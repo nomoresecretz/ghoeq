@@ -17,5 +17,8 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# Generated proto files
+*.pb.go
+
 # Go workspace file
 go.work
