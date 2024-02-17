@@ -96,7 +96,10 @@ func getSessionID(ctx context.Context, c pb.BackendServerClient) (string, error)
 			return "", err
 		}
 	}
-	if len(s.GetSessions()) != 1 {
+	switch l := len(s.GetSessions()); {
+	case l == 0:
+		return "", fmt.Errorf("no capture session avaliable")
+	case l > 1:
 		return "", fmt.Errorf("too many active sessions to pick one. select manually")
 	}
 	return s.GetSessions()[0].GetId(), nil
