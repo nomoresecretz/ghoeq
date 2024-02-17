@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+option go_package = "github.com/nomoresecretz/ghoeq/common/proto/ghoeq";
+//import "google/protobuf/DateTime.proto";
+
+package ghoeq;
+
+service BackendServer {
+    rpc ListSources (ListRequest) returns (ListSourcesResponse) {}
+    rpc ListSession (ListRequest) returns (ListSessionResponse) {}
+    rpc ListStreams (ListRequest) returns (ListStreamsResponse) {}
+    rpc ModifySession (ModifySessionRequest) returns (SessionResponse) {}
+    rpc AttachStreamRaw(AttachStreamRawRequest) returns (stream APPacket) {} // Simply a stream of decrypted / decompressed opcode + data packets
+    rpc AttachStreamStruct(AttachStreamStructRequest) returns (stream ClientPacket) {} // Normalized proper data packets - long term plan once backend can properly deseralize
+}
+
+message ListRequest {
+    string nonce = 1;
+    string id = 2;
+}
+
+message ListStreamsResponse {
+    repeated Stream streams = 1;
+}
+
+message SessionResponse {}
+
+message AttachStreamRawRequest {
+    string id = 1; // Start pulling a specific stream, or 0 for first avaliable if one or none.
+    string nonce = 2;
+    uint64 seq = 3; // Used for resume from previous sequence number. Not implmented yet.
+}
+
+message ListSourcesResponse {
+    repeated Source sources = 1;
+}
+
+message ListSessionResponse {
+    repeated Session sessions = 1;
+}
+
+message ModifySessionRequest {
+    repeated ModifyRequest mods = 1;
+    string nonce = 2;
+}
+
+message ModifyRequest {
+    uint32 id = 1;
+    State state = 2;
+    string source = 3;
+}
+
+message Session {
+    string id = 1;
+    string source = 2; //Interface / PacketCapture etc
+}
+
+message Source {
+    string id = 1;
+    string description = 2;
+}
+
+message Stream {
+    uint32 id = 1;
+    string source = 2; //Session / source
+    //google.protobuf.DateTime first_seen = 3;
+    Client client = 4;
+    repeated StreamThread sessions = 5;
+}
+
+message Client {
+    string address = 1;
+}
+
+message StreamThread {
+    string id = 1;
+    uint32 port = 2;
+    string peer_address = 3;
+    uint32 peer_port = 4;
+    PeerType type = 5;
+}
+
+enum State {
+    STATE_UNKNOWN = 0;
+    STATE_START = 1;
+    STATE_STOP = 2;
+}
+
+message APPacket {
+    uint64 seq = 1;
+    uint32 op_code = 2;
+    bytes data = 3;
+    string thread_ID = 4;
+}
+
+message ClientPacket {}
+
+message AttachStreamStructRequest {}
+
+enum PeerType {
+    PEER_UNKNOWN = 0;
+    PEER_LOGIN = 1;
+    PEER_WORLD = 2;
+    PEER_ZONE = 3;
+    PEER_CHAT = 4;
+}

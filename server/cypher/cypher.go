@@ -10,10 +10,6 @@ type CodePoint interface {
 	rune | byte | int
 }
 
-func bitxor[V CodePoint](a, b V) V {
-	return a ^ b
-}
-
 type cypherbox struct {
 	i  uint32
 	b  []uint64
@@ -28,22 +24,22 @@ type Cypher interface {
 	Seed(*cypherbox)
 }
 
-//Walk runs a single step in the encryption process.
+// Walk runs a single step in the encryption process.
 func (c *cypherbox) Walk() {
 	c.cy.Walk(c)
 }
 
-//WalkInvert reverses a single step in the cbox encryption process.
+// WalkInvert reverses a single step in the cbox encryption process.
 func (c *cypherbox) WalkInvert() {
 	c.cy.WalkInvert(c)
 }
 
-//Flip is a CBox function to handle the single pass pre encoding box swaps.
+// Flip is a CBox function to handle the single pass pre encoding box swaps.
 func (c *cypherbox) Flip() {
 	c.cy.Flip(c)
 }
 
-//Seed is intended to be a cbox handler INIT function if required.
+// Seed is intended to be a cbox handler INIT function if required.
 func (c *cypherbox) Seed() {
 	c.cy.Seed(c)
 }
@@ -63,7 +59,7 @@ func (c *cypherbox) Fill(d []byte) {
 	}
 }
 
-//Dump returns the contents of the CBox, presumably after processing.
+// Dump returns the contents of the CBox, presumably after processing.
 func (c *cypherbox) Dump(skip int) []byte {
 	ll := len(c.b)
 	b := []byte{}
@@ -75,7 +71,7 @@ func (c *cypherbox) Dump(skip int) []byte {
 	return b[skip:]
 }
 
-//NewCBox returns a CypherBox designed to decrypt various flavors of client packets. Has Pluggable modules.
+// NewCBox returns a CypherBox designed to decrypt various flavors of client packets. Has Pluggable modules.
 func NewCBox(s int, c Cypher) *cypherbox {
 	size := s >> 3
 	b := make([]uint64, int(size))
@@ -86,7 +82,7 @@ func NewCBox(s int, c Cypher) *cypherbox {
 	}
 }
 
-//NewReader returns an io.readerized version of the basic Dump function.
+// NewReader returns an io.readerized version of the basic Dump function.
 func (c *cypherbox) NewReader(skip int) io.Reader {
 	return bytes.NewReader(c.Dump(skip))
 }
@@ -102,7 +98,7 @@ func (c *cypherNull) WalkInvert(*cypherbox) {}
 func (c *cypherNull) Flip(*cypherbox)       {}
 func (c *cypherNull) Seed(*cypherbox)       {}
 
-//NewNull returns a non decryption handler, basically intended to handle the compressed but unencrypted packets.
+// NewNull returns a non decryption handler, basically intended to handle the compressed but unencrypted packets.
 func NewNull() *cypherNull {
 	return &cypherNull{}
 }

@@ -91,16 +91,16 @@ const (
 var OldEQOuterType = gopacket.RegisterLayerType(
 	2010,
 	gopacket.LayerTypeMetadata{
-		"OldEQOuterType",
-		gopacket.DecodeFunc(DecodeOldEQOuter),
+		Name: "OldEQOuterType",
+		Decoder: gopacket.DecodeFunc(DecodeOldEQOuter),
 	},
 )
 
 var EQApplicationType = gopacket.RegisterLayerType(
 	2011,
 	gopacket.LayerTypeMetadata{
-		"EQApplicationType",
-		gopacket.DecodeFunc(DecodeEQApp),
+		Name: "EQApplicationType",
+		Decoder: gopacket.DecodeFunc(DecodeEQApp),
 	},
 )
 
