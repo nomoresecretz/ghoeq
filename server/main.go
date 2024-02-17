@@ -78,6 +78,7 @@ func doStuff(ctx context.Context) error {
 				grpc.GracefulStop()
 				ctxcf()
 			case <-wctx.Done():
+				grpc.GracefulStop()
 				return nil
 			}
 		}
