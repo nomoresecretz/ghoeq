@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/nomoresecretz/ghoeq/common/decoder"
 	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -17,6 +18,7 @@ import (
 var (
 	serverAddr = flag.String("server", "127.0.0.1:6420", "Server target info")
 	src        = flag.String("source", "", "server capture source")
+	opFile     = flag.String("opFile", "opcodes.txt", "opcode mapping data file")
 )
 
 // Simple rpc test client
@@ -36,6 +38,12 @@ func doStuff(ctx context.Context) error {
 	}
 	defer conn.Close()
 
+	dec := decoder.NewDecoder()
+	if *opFile != "" {
+		if err := dec.LoadMap(*opFile); err != nil {
+			return err
+		}
+	}
 	c := pb.NewBackendServerClient(conn)
 
 	// Until auto sessions are in, we have to do the grunt work.
@@ -62,8 +70,13 @@ func doStuff(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		opRaw := p.GetOpCode()
+		op := dec.GetOp(uint16(opRaw))
+		if op == "" {
+			op = fmt.Sprintf("%#4x", opRaw)
+		}
 		// TODO: move opcode decoder to independent common module. Add api to push/pull from server.
-		fmt.Printf("Packet %#4x : OpCode %s %s", 0x0, p.GetOpCode(), spew.Sdump(p.GetData()))
+		fmt.Printf("Packet %#4X : OpCode %s %s", 0x0, op, spew.Sdump(p.GetData()))
 	}
 
 	return nil

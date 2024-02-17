@@ -18,7 +18,7 @@ import (
 
 var (
 	// cFile    = flag.String("file", "", "Prior capture file")
-	opMap    = flag.String("opFile", "opcodes.txt", "File with opcode mappings")
+	opMap    = flag.String("opFile", "", "File with opcode mappings")
 	port     = flag.Uint("port", 6420, "port to listen on for connections")
 	bindAddr = flag.String("bindAddr", "", "Network bind address")
 )
@@ -60,6 +60,7 @@ func doStuff(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	
 	var ops []grpc.ServerOption
 	grpc := grpc.NewServer(ops...)
 	gs, err := NewGhoeqServer(ctx)

@@ -41,7 +41,7 @@ func TestWalk(t *testing.T) {
 			bs := testData(t, tc.bufFile)
 			cb := NewCBox(len(bs)-1, tc.cypher)
 			cb.Fill(bs[:])
-			cb.Flip()
+			cb.Flip(0)
 			cb.Seed()
 
 			for k := 0; k < cb.Len(); k++ {
@@ -92,8 +92,8 @@ func TestWalkBack(t *testing.T) {
 			} else {
 				want = tc.want
 			}
-			
-			cb.Flip()
+
+			cb.Flip(0)
 
 			got := cb.Dump(0)
 			if diff := cmp.Diff(got[:len(want)], want); diff != "" {

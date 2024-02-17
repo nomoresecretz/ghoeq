@@ -20,7 +20,7 @@ type cypherbox struct {
 type Cypher interface {
 	Walk(*cypherbox)
 	WalkInvert(*cypherbox)
-	Flip(*cypherbox)
+	Flip(*cypherbox, int)
 	Seed(*cypherbox)
 }
 
@@ -35,13 +35,17 @@ func (c *cypherbox) WalkInvert() {
 }
 
 // Flip is a CBox function to handle the single pass pre encoding box swaps.
-func (c *cypherbox) Flip() {
-	c.cy.Flip(c)
+func (c *cypherbox) Flip(i int) {
+	c.cy.Flip(c, i)
 }
 
 // Seed is intended to be a cbox handler INIT function if required.
 func (c *cypherbox) Seed() {
 	c.cy.Seed(c)
+}
+
+func (c *cypherbox) Peek(loc, size int64) []uint64 {
+	return c.b[loc : loc+size]
 }
 
 func (c *cypherbox) Fill(d []byte) {
@@ -99,7 +103,7 @@ type cypherNull struct{}
 
 func (c *cypherNull) Walk(*cypherbox)       {}
 func (c *cypherNull) WalkInvert(*cypherbox) {}
-func (c *cypherNull) Flip(*cypherbox)       {}
+func (c *cypherNull) Flip(*cypherbox, int)  {}
 func (c *cypherNull) Seed(*cypherbox)       {}
 
 // NewNull returns a non decryption handler, basically intended to handle the compressed but unencrypted packets.

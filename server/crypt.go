@@ -23,13 +23,14 @@ func NewCrypter() *crypter {
 		opMap: map[string]cypher.Cypher{
 			"OP_CharInventory":       cypher.NewNull(),
 			"OP_ShopInventoryPacket": cypher.NewNull(),
+			"OP_SpawnDoor":           cypher.NewNull(),
 		},
 	}
 }
 
 func (c *crypter) IsCrypted(s string) bool {
 	_, err := c.getCypher(s)
-	
+
 	return err == nil
 }
 
@@ -44,7 +45,7 @@ func (c *crypter) getCypher(s string) (cypher.Cypher, error) {
 // Decrypt does the work of decrypting a EQAppPacket. Currently only supports Quarm style.
 func (c *crypter) Decrypt(s string, data []byte) ([]byte, error) {
 	skipHeader := 0
-	if s == "OP_CharInventory" || s == "OP_ShopInventoryPacket" {
+	if s == "OP_CharInventory" || s == "OP_ShopInventoryPacket" || s == "OP_SpawnDoor" {
 		skipHeader = 2
 	}
 	cy, err := c.getCypher(s)
@@ -58,10 +59,17 @@ func (c *crypter) Decrypt(s string, data []byte) ([]byte, error) {
 	for k := 0; k < cb.Len(); k++ {
 		cb.WalkInvert()
 	}
-	cb.Flip()
+	cb.Flip(0)
+
+	// terrible hack to fix a bug.
+	r := cb.Peek(0, 1)[0] & 0xffff
+	if r != 0x5e78 {
+		cb.Flip(0)
+		cb.Flip(1)
+	}
 	z, err := zlib.NewReader(cb.NewReader(0))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error decrypting (%s)", s, err)
 	}
 	defer z.Close()
 	return io.ReadAll(z)

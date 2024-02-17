@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nomoresecretz/ghoeq/common/decoder"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/peer"
 )
@@ -128,7 +129,7 @@ func (s *session) timeoutWatch(ctx context.Context) {
 // processPackets is just a placeholder for the grunt work until the real structure exists.
 func (s *session) processPackets(ctx context.Context, cin <-chan *EQApplication, cout chan<- *EQApplication, sm *streamMgr) error {
 	c := NewCrypter()
-	d := NewDecoder()
+	d := decoder.NewDecoder()
 	if err := d.LoadMap(*opMap); err != nil {
 		return err
 	}
@@ -235,7 +236,7 @@ func (sc *sessionClient) Close() {
 	if sc.handle == nil {
 		return
 	}
-	
+
 	close(sc.handle)
 	sc.handle = nil
 }
