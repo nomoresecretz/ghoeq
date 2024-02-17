@@ -59,7 +59,10 @@ func (s *sessionMgr) requestHandler(ctx context.Context) error {
 		select {
 		case <-wctx.Done():
 			done = true
-		case r := <-sc:
+		case r, ok := <-sc:
+			if !ok {
+				break
+			}
 			if err := s.handleRequest(wctx, r, g); err != nil {
 				return err
 			}
