@@ -42,21 +42,21 @@ type fragI struct {
 
 // TODO: Implement proper unique  stream tracking.
 
-//NewAssembler returns a stream aware packet fragment assembler.
+// NewAssembler returns a stream aware packet fragment assembler.
 func NewAssembler(s *streamPool) *assembler {
 	return &assembler{
 		p: s,
 	}
 }
 
-//NewStreamPool is intended to be a pool for tracking the various known streams, this is just a blind shell to be implemented later.
+// NewStreamPool is intended to be a pool for tracking the various known streams, this is just a blind shell to be implemented later.
 func NewStreamPool(f *streamFactory) *streamPool {
 	return &streamPool{
 		frags: make(map[uint16]*fragI),
 	}
 }
 
-//Assemble is a reassembler for fragmented Old style packets.
+// Assemble is a reassembler for fragmented Old style packets.
 func (a *assembler) Assemble(np *OldEQOuter) (*OldEQOuter, error) {
 	pool := a.p
 	pool.mu.Lock()
@@ -100,40 +100,49 @@ func (s *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<- 
 
 	c := NewCapture(h)
 
-	for p := range c.Packets() {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		s.packets++
-		// Skip non interesting packets
-		o := p.Layer(OldEQOuterType)
-		if o == nil {
-			continue
-		}
-		s.eqpackets++
-		// Reassemble fragment packets
-		op := o.(*OldEQOuter)
-		if op.hasFlag(Frag) {
-			op, err := fragAsm.Assemble(op)
-			if err != nil {
-				return err
-			}
-			if op == nil {
-				continue
-			}
-		}
-		payload := op.Payload
-		p := gopacket.NewPacket(payload, EQApplicationType, gopacket.Default)
-		eqold := p.Layer(EQApplicationType)
-		if eqold == nil {
-			continue
-		}
-		ep, _ := eqold.(*EQApplication)
+	pChan := c.Packets()
+	defer close(cout)
+	var done bool
+	for !done {
 		select {
 		case <-ctx.Done():
-		case cout <- ep:
+			done = true
+			break
+		case p, ok := <-pChan:
+			if !ok {
+				done = true
+				break
+			}
+			s.packets++
+			// Skip non interesting packets
+			o := p.Layer(OldEQOuterType)
+			if o == nil {
+				continue
+			}
+			s.eqpackets++
+			// Reassemble fragment packets
+			op := o.(*OldEQOuter)
+			if op.hasFlag(Frag) {
+				op, err := fragAsm.Assemble(op)
+				if err != nil {
+					return err
+				}
+				if op == nil {
+					continue
+				}
+			}
+			payload := op.Payload
+			p = gopacket.NewPacket(payload, EQApplicationType, gopacket.Default)
+			eqold := p.Layer(EQApplicationType)
+			if eqold == nil {
+				continue
+			}
+			ep, _ := eqold.(*EQApplication)
+			select {
+			case <-ctx.Done():
+			case cout <- ep:
+			}
 		}
 	}
-	close(cout)
 	return nil
 }

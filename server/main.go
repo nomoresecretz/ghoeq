@@ -60,7 +60,7 @@ func doStuff(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	
+
 	var ops []grpc.ServerOption
 	grpc := grpc.NewServer(ops...)
 	gs, err := NewGhoeqServer(ctx)
@@ -78,6 +78,7 @@ func doStuff(ctx context.Context) error {
 				gs.GracefulStop()
 				grpc.GracefulStop()
 				ctxcf()
+				return nil
 			case <-wctx.Done():
 				grpc.GracefulStop()
 				return nil
