@@ -47,7 +47,7 @@ func processPackets(ctx context.Context, cin <-chan *EQApplication, s *streamMgr
 		if c.IsCrypted(opCode) {
 			res, err := c.Decrypt(opCode, p.Payload)
 			if err != nil {
-				slog.Error(fmt.Sprintf("error decrpyting %w", err))
+				slog.Error(fmt.Sprintf("error decrpyting %s", err))
 			}
 			p.Payload = res
 		}
