@@ -12,6 +12,11 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
+const (
+	clientBuffer = 50 // packets
+	fanBuffer    = 10
+)
+
 type sessionHandle interface {
 	Close()
 }
@@ -47,16 +52,18 @@ func (s *session) Run(ctx context.Context, src string) error {
 		return err
 	}
 	s.handle = h
+
 	defer h.Close()
 
 	// TODO: replace this with lockless ring buffer.
-	apc := make(chan *EQApplication, 10)
-	apcb := make(chan *EQApplication, 10)
+	apc := make(chan *EQApplication, fanBuffer)
+	apcb := make(chan *EQApplication, fanBuffer)
 	sm := NewStreamMgr()
 
 	wg, wctx := errgroup.WithContext(ctx)
 	wg.Go(func() error {
 		s.timeoutWatch(wctx)
+
 		return nil
 	})
 	wg.Go(func() error {
@@ -64,6 +71,7 @@ func (s *session) Run(ctx context.Context, src string) error {
 	})
 	wg.Go(func() error {
 		defer close(apcb)
+
 		return s.processPackets(wctx, apc, apcb, sm)
 	})
 	wg.Go(func() error {
@@ -88,6 +96,7 @@ func (s *session) timeoutWatch(ctx context.Context) {
 		remain := time.Until(s.lastClient.Add(clientTimeout))
 		tik = time.NewTimer(remain)
 	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -96,15 +105,20 @@ func (s *session) timeoutWatch(ctx context.Context) {
 			s.mu.RLock()
 			if len(s.clients) > 0 {
 				s.lastClient = time.Now()
+
 				newTimer()
 				s.mu.RUnlock()
+
 				continue
 			}
+
 			if time.Since(s.lastClient) >= clientTimeout {
 				s.Close()
 				s.mu.RUnlock()
+
 				return
 			}
+
 			newTimer()
 			s.mu.RUnlock()
 		}
@@ -127,6 +141,7 @@ func (s *session) processPackets(ctx context.Context, cin <-chan *EQApplication,
 		if opCode == "" {
 			opCode = fmt.Sprintf("%#4x", p.OpCode)
 		}
+
 		if c.IsCrypted(opCode) {
 			res, err := c.Decrypt(opCode, p.Payload)
 			if err != nil {
@@ -136,6 +151,7 @@ func (s *session) processPackets(ctx context.Context, cin <-chan *EQApplication,
 		}
 		cout <- p
 	}
+
 	return nil
 }
 
@@ -152,12 +168,15 @@ func (s *session) handleClients(ctx context.Context, apcb <-chan *EQApplication,
 					if sc.handle == nil {
 						continue
 					}
+
 					close(sc.handle)
 					sc.handle = nil
 				}
 				s.mu.RUnlock()
+
 				return nil // chan closure
 			}
+
 			s.mu.RLock()
 			for _, c := range s.clients {
 				c.Send(ctx, p)
@@ -167,14 +186,14 @@ func (s *session) handleClients(ctx context.Context, apcb <-chan *EQApplication,
 	}
 }
 
-// Send relays the packet to the attached client session
+// Send relays the packet to the attached client session.
 func (c *sessionClient) Send(ctx context.Context, p *EQApplication) {
 	// TODO: convert this to a ring buffer
 	select {
 	case c.handle <- p:
 	case <-ctx.Done():
 	default:
-		slog.Error("failed to send to client", "client", c)
+		slog.Error("failed to send to client", "client", c, "opcode", p.OpCode)
 	}
 }
 
@@ -185,12 +204,14 @@ func (c *sessionClient) String() string {
 func (s *session) AddClient(ctx context.Context) (*sessionClient, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ch := make(chan *EQApplication, 10)
+	ch := make(chan *EQApplication, clientBuffer)
 	cinfo, ok := peer.FromContext(ctx)
+
 	var clientTag string
 	if ok {
 		clientTag = cinfo.Addr.String()
 	}
+
 	slog.Info("capture session adding client", "session", s.id.String(), "client", clientTag)
 
 	id := uuid.New()
@@ -201,6 +222,7 @@ func (s *session) AddClient(ctx context.Context) (*sessionClient, error) {
 		id:     id,
 	}
 	s.clients[id] = c
+
 	return c, nil
 }
 
@@ -209,9 +231,11 @@ func (sc *sessionClient) Close() {
 	sc.parent.mu.Lock()
 	delete(sc.parent.clients, sc.id)
 	sc.parent.mu.Unlock()
+
 	if sc.handle == nil {
 		return
 	}
+	
 	close(sc.handle)
 	sc.handle = nil
 }

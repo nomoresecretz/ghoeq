@@ -46,6 +46,7 @@ func (c *cypherbox) Seed() {
 
 func (c *cypherbox) Fill(d []byte) {
 	ll := len(d)
+
 	mod := ll % 8
 	if mod > 0 {
 		final := make([]byte, 8-mod)
@@ -53,6 +54,7 @@ func (c *cypherbox) Fill(d []byte) {
 		d = append(d[:ll-mod], final...)
 		c.b = append(c.b, 0)
 	}
+
 	for i := 0; i < len(c.b); i++ {
 		iv := i << 3
 		c.b[i] = binary.LittleEndian.Uint64(d[iv:])
@@ -64,10 +66,12 @@ func (c *cypherbox) Dump(skip int) []byte {
 	ll := len(c.b)
 	b := []byte{}
 	bt := make([]byte, 8)
+
 	for i := 0; i < ll; i++ {
 		binary.LittleEndian.PutUint64(bt, c.b[i])
 		b = append(b, bt...)
 	}
+
 	return b[skip:]
 }
 
