@@ -15,8 +15,7 @@ const (
 	clientTimeout = 10 * time.Minute
 )
 
-//var errDuplicateSession = errors.New("duplicate capture session")
-
+// var errDuplicateSession = errors.New("duplicate capture session")
 type sessionRequest struct {
 	replyChan chan<- replyStruct
 	src       string
@@ -58,7 +57,7 @@ func (s *sessionMgr) requestHandler(ctx context.Context) error {
 	var done bool
 	for !done {
 		select {
-		case <-ctx.Done():
+		case <-wctx.Done():
 			done = true
 		case r := <-sc:
 			if err := s.handleRequest(wctx, r, g); err != nil {

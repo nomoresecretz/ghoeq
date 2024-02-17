@@ -21,6 +21,7 @@ var (
 
 // Simple rpc test client
 func main() {
+	flag.Parse()
 	err := doStuff(context.Background())
 	if err != nil {
 		slog.Error("failed to do x: %w", err)
