@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	capTimeout  = 1 * time.Second
+	capTimeout  = 250 * time.Millisecond
 	promiscuous = true
 )
 
@@ -17,7 +17,7 @@ type capture struct {
 	s *gopacket.PacketSource
 }
 
-//NewCapture returns a capture object capable of decoding client streams.
+// NewCapture returns a capture object capable of decoding client streams.
 func NewCapture(h *pcap.Handle) *capture {
 	layers.RegisterUDPPortLayerType(6000, OldEQOuterType)
 	layers.RegisterUDPPortLayerType(9000, OldEQOuterType)
@@ -27,7 +27,7 @@ func NewCapture(h *pcap.Handle) *capture {
 	return &capture{s: gopacket.NewPacketSource(h, h.LinkType())}
 }
 
-//Packets returns a packets channel. To eventually be replaced by a ring buffer system.
+// Packets returns a packets channel. To eventually be replaced by a ring buffer system.
 func (c *capture) Packets() chan gopacket.Packet {
 	return c.s.Packets()
 }
@@ -36,6 +36,13 @@ func liveHandle(d string) (*pcap.Handle, error) {
 	return pcap.OpenLive(d, 1024, promiscuous, capTimeout)
 }
 
+/*
 func fileHandle(f string) (*pcap.Handle, error) {
 	return pcap.OpenOffline(f)
+}
+*/
+
+// GetSources returns the list of captureable interfaces.
+func GetSources() ([]pcap.Interface, error) {
+	return pcap.FindAllDevs()
 }
