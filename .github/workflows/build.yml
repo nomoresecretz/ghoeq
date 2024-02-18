@@ -22,6 +22,10 @@ jobs:
                 repo-token: ${{ secrets.GITHUB_TOKEN }}
           - name: Protogen
             run: protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative $(find $PROTO_DIR -type f -name '*.proto')
+          - name: Installing protoc-gen-go
+            run: |
+              go get github.com/golang/protobuf/protoc-gen-go
+              go get google.golang.org/grpc/cmd/protoc-gen-go-grpc
           - name: Build
             run: go build -v ./...
           - name: Test
