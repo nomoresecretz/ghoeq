@@ -20,6 +20,8 @@ jobs:
             uses: arduino/setup-protoc@v3
             with:
                 repo-token: ${{ secrets.GITHUB_TOKEN }}
+          - name: Protogen
+            run: protoc protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative $(find $PROTO_DIR -type f -name '*.proto')
           - name: Build
             run: go build -v ./...
           - name: Test
