@@ -20,6 +20,8 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache-dependency-path: subdir/go.sum
+      - name: Install libpcap
+        run: sudo apt-get install libpcap-dev
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v4
         with:
