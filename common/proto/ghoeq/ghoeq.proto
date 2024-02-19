@@ -8,10 +8,26 @@ package ghoeq;
 service BackendServer {
     rpc ListSources (ListRequest) returns (ListSourcesResponse) {}
     rpc ListSession (ListRequest) returns (ListSessionResponse) {}
-    rpc ListStreams (ListRequest) returns (ListStreamsResponse) {}
+    rpc ListStreams (ListStreamRequest) returns (ListStreamsResponse) {}
     rpc ModifySession (ModifySessionRequest) returns (SessionResponse) {}
+    rpc AttachClient(AttachClientRequest) returns (stream ClientUpdate) {}
     rpc AttachStreamRaw(AttachStreamRawRequest) returns (stream APPacket) {} // Simply a stream of decrypted / decompressed opcode + data packets
     rpc AttachStreamStruct(AttachStreamStructRequest) returns (stream ClientPacket) {} // Normalized proper data packets - long term plan once backend can properly deseralize
+}
+
+message AttachClientRequest {
+    string client_id = 1;
+}
+
+message ClientUpdate {
+    repeated StreamThread stream_threads = 1;
+    Client client = 2; // Offered on first avail
+}
+
+message ListStreamRequest {
+    string nonce = 1;
+    string session_id = 2;
+    string stream_id = 3;
 }
 
 message ListRequest {
@@ -29,6 +45,7 @@ message AttachStreamRawRequest {
     string id = 1; // Start pulling a specific stream, or 0 for first avaliable if one or none.
     string nonce = 2;
     uint64 seq = 3; // Used for resume from previous sequence number. Not implmented yet.
+    string session_id = 4;
 }
 
 message ListSourcesResponse {
@@ -62,14 +79,15 @@ message Source {
 
 message Stream {
     uint32 id = 1;
-    string source = 2; //Session / source
+    reserved 2; //deprecated
     //google.protobuf.DateTime first_seen = 3;
     Client client = 4;
     repeated StreamThread sessions = 5;
 }
 
 message Client {
-    string address = 1;
+    string id = 1;
+    string address = 2;
 }
 
 message StreamThread {
@@ -92,7 +110,8 @@ message APPacket {
     uint64 seq = 1;
     uint32 op_code = 2;
     bytes data = 3;
-    StreamThread streamInfo = 4;
+    reserved 4; //deprecated
+    string stream_id = 5;
 }
 
 message ClientPacket {}

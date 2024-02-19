@@ -52,10 +52,6 @@ func main() {
 
 // doStuff does the actual heavy lifting running the server.
 func doStuff(ctx context.Context) error {
-	if len(cDev) == 0 {
-		return fmt.Errorf("please specify allowed capture interfaces, ideally just 1")
-	}
-
 	ctx, ctxcf := context.WithCancel(ctx)
 	defer ctxcf()
 
@@ -63,13 +59,25 @@ func doStuff(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer l.Close()
 
 	var ops []grpc.ServerOption
 	grpc := grpc.NewServer(ops...)
-	
+
 	gs, err := NewGhoeqServer(ctx)
 	if err != nil {
 		return err
+	}
+	if len(cDev) == 0 {
+		sl, err := gs.ListSources(ctx, &pb.ListRequest{})
+		if err != nil {
+			return err
+		}
+		slog.Error("please allow one or more of the following capture sources:")
+		for _, s := range sl.Sources {
+			slog.Error("source", "id", s.Id, "description", s.Description)
+		}
+		return fmt.Errorf("no source selected")
 	}
 
 	pb.RegisterBackendServerServer(grpc, gs)
@@ -98,7 +106,7 @@ func doStuff(ctx context.Context) error {
 
 	eg.Go(func() error {
 		slog.Info("Starting server")
-		
+
 		return grpc.Serve(l)
 	})
 

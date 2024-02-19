@@ -53,7 +53,7 @@ func (p *streamPool) getConnection(ctx context.Context, k Key, end bool, ts time
 		return conn
 	}
 
-	s := p.factory.New(k[0], k[1], op, ac)
+	s := p.factory.New(ctx, k[0], k[1], op, ac)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	conn = p.newConnection(ctx, k, s, ts)

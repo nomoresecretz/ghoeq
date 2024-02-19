@@ -23,11 +23,12 @@ type (
 	Key           [2]gopacket.Flow
 	Sequence      int64
 	streamFactory interface {
-		New(netFlow, portFlow gopacket.Flow, p gopacket.Layer, ac AssemblerContext) Stream
+		New(ctx context.Context, netFlow, portFlow gopacket.Flow, p gopacket.Layer, ac AssemblerContext) Stream
 	}
 	Stream interface {
 		Accept(p gopacket.Layer, ci gopacket.CaptureInfo, dir FlowDirection, nextSeq Sequence, start *bool, ac AssemblerContext) bool
-		Send(ctx context.Context, p gopacket.Layer) error
+		Send(ctx context.Context, p gopacket.Layer, seq uint16) error
+		Clean()
 	}
 )
 

@@ -101,4 +101,5 @@ func (c *connection) Clean() {
 
 	c.closed = true
 	c.stream = nil
+	c.stream.Clean()
 }

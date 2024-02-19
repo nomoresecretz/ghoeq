@@ -128,28 +128,3 @@ func (sm *sessionMgr) GracefulStop() {
 		ses.Close()
 	}
 }
-
-func (sm *sessionMgr) AttachToSession(ctx context.Context, sid string) (*sessionClient, error) {
-	var once sync.Once
-
-	sm.muSessions.RLock()
-	defer once.Do(sm.muSessions.RUnlock)
-
-	if sid == "0" {
-		// Add default session if possible
-		return nil, fmt.Errorf("default session logic not implemented yet")
-	}
-
-	uid, err := uuid.Parse(sid)
-	if err != nil {
-		return nil, err
-	}
-
-	s, ok := sm.sessions[uid]
-	if !ok {
-		return nil, fmt.Errorf("session %s does not exist", sid)
-	}
-	once.Do(sm.muSessions.RUnlock)
-
-	return s.AddClient(ctx)
-}

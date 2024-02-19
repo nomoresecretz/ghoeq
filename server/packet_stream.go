@@ -8,6 +8,7 @@ import (
 	"github.com/gopacket/gopacket/pcap"
 	"github.com/nomoresecretz/ghoeq/common/eqOldPacket"
 	"github.com/nomoresecretz/ghoeq/server/assembler"
+	"golang.org/x/sync/errgroup"
 )
 
 type streamMgr struct {
@@ -16,28 +17,30 @@ type streamMgr struct {
 	decoder   opDecoder
 
 	mu            sync.RWMutex
-	clientStreams map[assembler.Key]any
+	clientStreams map[assembler.Key]*stream
+	streamMap map[string]assembler.Key
 }
 
-type opDecoder interface{
+type opDecoder interface {
 	GetOp(uint16) string
 	GetOpByName(string) uint16
 }
 
 func NewStreamMgr(d opDecoder) *streamMgr {
 	return &streamMgr{
-		clientStreams: make(map[assembler.Key]any),
+		clientStreams: make(map[assembler.Key]*stream),
+		streamMap: make(map[string]assembler.Key),
 		decoder:       d,
 	}
 }
 
 // NewCapture sets up a new capture session on an interface / source.
-func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<- streamPacket) error {
+func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<- streamPacket, wg *errgroup.Group) error {
 	if err := h.SetBPFFilter("port 9000 or port 6000 or portrange 7000-7400"); err != nil {
 		return (err)
 	}
 
-	streamFactory := NewStreamFactory(sm, cout)
+	streamFactory := NewStreamFactory(sm, cout, wg)
 	streamPool := assembler.NewStreamPool(streamFactory)
 	streamAsm := assembler.NewAssembler(streamPool)
 
@@ -79,7 +82,8 @@ func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<-
 				continue
 			}
 
-			payload := op.Payload
+			var payload []byte
+			copy(payload, op.Payload) // Checking if this fixes a repeat bug.
 			p = gopacket.NewPacket(payload, eqOldPacket.EQApplicationType, gopacket.Default)
 
 			eqold := p.Layer(eqOldPacket.EQApplicationType)
@@ -87,7 +91,7 @@ func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<-
 				continue
 			}
 
-			if err := stream.Send(ctx, eqold); err != nil {
+			if err := stream.Send(ctx, eqold, op.Seq); err != nil {
 				return err
 			}
 		}
