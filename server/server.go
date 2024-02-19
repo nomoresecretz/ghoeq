@@ -18,12 +18,15 @@ type ghoeqServer struct {
 
 func NewGhoeqServer(ctx context.Context) (*ghoeqServer, error) {
 	allowedDev := make(map[string]struct{})
+	
 	for _, d := range cDev {
 		if d != "" {
 			allowedDev[d] = struct{}{}
 		}
 	}
+
 	slog.Info("allowed device list", "allowed_devs", allowedDev)
+	
 	return &ghoeqServer{
 		allowedDev: allowedDev,
 	}, nil
@@ -31,6 +34,7 @@ func NewGhoeqServer(ctx context.Context) (*ghoeqServer, error) {
 
 func (s *ghoeqServer) validSource(src string) bool {
 	_, v := s.allowedDev[src]
+
 	return v || len(s.allowedDev) == 0
 }
 
@@ -38,8 +42,10 @@ func (s *ghoeqServer) Go(ctx context.Context) error {
 	g, wctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		s.sMgr = NewSessionManager()
+		
 		return s.sMgr.Go(wctx, s)
 	})
+
 	return g.Wait()
 }
 
@@ -49,6 +55,7 @@ func (s *ghoeqServer) ListSources(ctx context.Context, r *pb.ListRequest) (*pb.L
 		return nil, err
 	}
 	var rs []*pb.Source
+
 	l := len(s.allowedDev)
 	for _, i := range sl {
 		if !s.validSource(i.Name) && l > 0 {
@@ -60,6 +67,7 @@ func (s *ghoeqServer) ListSources(ctx context.Context, r *pb.ListRequest) (*pb.L
 			Description: i.Description,
 		})
 	}
+
 	return &pb.ListSourcesResponse{
 		Sources: rs,
 	}, nil
@@ -68,14 +76,17 @@ func (s *ghoeqServer) ListSources(ctx context.Context, r *pb.ListRequest) (*pb.L
 // ListSession lists the current active capture sessions.
 func (s *ghoeqServer) ListSession(ctx context.Context, p *pb.ListRequest) (*pb.ListSessionResponse, error) {
 	var sessions []*pb.Session
+
 	s.sMgr.muSessions.RLock()
 	defer s.sMgr.muSessions.RUnlock()
+
 	for id, session := range s.sMgr.sessions {
 		sessions = append(sessions, &pb.Session{
 			Id:     id.String(),
 			Source: session.source,
 		})
 	}
+
 	return &pb.ListSessionResponse{
 		Sessions: sessions,
 	}, nil
@@ -92,6 +103,7 @@ func (s *ghoeqServer) ModifySession(ctx context.Context, r *pb.ModifySessionRequ
 			return nil, err
 		}
 	}
+
 	return &pb.SessionResponse{}, nil
 }
 
@@ -100,11 +112,13 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRawRequest, stream pb.Ba
 	ctx := stream.Context()
 	// Get a pull channel
 	sid := r.GetId()
+
 	// TODO: attach to client stream, not generic capture session. AKA implement true client tracking as a middle layer.
 	clientSession, err := s.sMgr.AttachToSession(ctx, sid)
 	if err != nil {
 		return err
 	}
+
 	defer clientSession.Close()
 
 	// loop sending the packets to the client
@@ -116,10 +130,22 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRawRequest, stream pb.Ba
 			if !ok {
 				return nil
 			}
-			op := &pb.APPacket{
-				OpCode: uint32(p.OpCode),
-				Data:   p.Payload,
+
+			st := &pb.StreamThread{
+				Port: p.stream.port.Src().String(),
+				PeerPort: p.stream.port.Dst().String(),
+				PeerAddress: p.stream.net.Dst().String(),
+				Address: p.stream.net.Src().String(),
+				Type: pb.PeerType(p.stream.sType),
+				Direction: pb.Direction(p.stream.dir),
 			}
+			op := &pb.APPacket{
+				Seq: p.seq,
+				OpCode: uint32(p.packet.OpCode),
+				Data:   p.packet.Payload,
+				StreamInfo: st,
+			}
+
 			if err := stream.Send(op); err != nil {
 				return err
 			}

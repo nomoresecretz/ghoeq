@@ -24,7 +24,7 @@ type sessionHandle interface {
 
 type sessionClient struct {
 	id     uuid.UUID
-	handle chan *EQApplication
+	handle chan streamPacket
 	info   string
 	parent *session
 }
@@ -52,14 +52,20 @@ func (s *session) Run(ctx context.Context, src string) error {
 	if err != nil {
 		return err
 	}
+
 	s.handle = h
 
 	defer h.Close()
 
+	d := decoder.NewDecoder()
+	if err := d.LoadMap(*opMap); err != nil {
+		return err
+	}
+
 	// TODO: replace this with lockless ring buffer.
-	apc := make(chan *EQApplication, fanBuffer)
-	apcb := make(chan *EQApplication, fanBuffer)
-	sm := NewStreamMgr()
+	apc := make(chan streamPacket, fanBuffer)
+	apcb := make(chan streamPacket, fanBuffer)
+	sm := NewStreamMgr(d)
 
 	wg, wctx := errgroup.WithContext(ctx)
 	wg.Go(func() error {
@@ -93,6 +99,7 @@ func (s *session) timeoutWatch(ctx context.Context) {
 	defer func() {
 		tik.Stop()
 	}()
+
 	newTimer := func() {
 		remain := time.Until(s.lastClient.Add(clientTimeout))
 		tik = time.NewTimer(remain)
@@ -127,28 +134,34 @@ func (s *session) timeoutWatch(ctx context.Context) {
 }
 
 // processPackets is just a placeholder for the grunt work until the real structure exists.
-func (s *session) processPackets(ctx context.Context, cin <-chan *EQApplication, cout chan<- *EQApplication, sm *streamMgr) error {
+func (s *session) processPackets(ctx context.Context, cin <-chan streamPacket, cout chan<- streamPacket, sm *streamMgr) error {
 	c := NewCrypter()
-	d := decoder.NewDecoder()
-	if err := d.LoadMap(*opMap); err != nil {
-		return err
-	}
 
 	for p := range cin {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		opCode := d.GetOp(p.OpCode)
+
+		ap := p.packet
+
+		d := sm.decoder
+
+		opCode := d.GetOp(ap.OpCode)
 		if opCode == "" {
-			opCode = fmt.Sprintf("%#4x", p.OpCode)
+			opCode = fmt.Sprintf("%#4x", ap.OpCode)
 		}
 
 		if c.IsCrypted(opCode) {
-			res, err := c.Decrypt(opCode, p.Payload)
+			res, err := c.Decrypt(opCode, ap.Payload)
 			if err != nil {
 				slog.Error(fmt.Sprintf("error decrpyting %s", err))
 			}
-			p.Payload = res
+
+			ap.Payload = res
+		}
+		
+		if p.stream.sType == ST_UNKNOWN {
+			p.stream.Identify(ctx, p.packet)
 		}
 		cout <- p
 	}
@@ -157,12 +170,12 @@ func (s *session) processPackets(ctx context.Context, cin <-chan *EQApplication,
 }
 
 // handleClients runs the fanout loop for client sessions.
-func (s *session) handleClients(ctx context.Context, apcb <-chan *EQApplication, sm *streamMgr) error {
+func (s *session) handleClients(ctx context.Context, apcb <-chan streamPacket, sm *streamMgr) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case p, ok := <-apcb:
+		case ap, ok := <-apcb:
 			if !ok {
 				s.mu.RLock()
 				for _, sc := range s.clients {
@@ -180,7 +193,7 @@ func (s *session) handleClients(ctx context.Context, apcb <-chan *EQApplication,
 
 			s.mu.RLock()
 			for _, c := range s.clients {
-				c.Send(ctx, p)
+				c.Send(ctx, ap)
 			}
 			s.mu.RUnlock()
 		}
@@ -188,13 +201,13 @@ func (s *session) handleClients(ctx context.Context, apcb <-chan *EQApplication,
 }
 
 // Send relays the packet to the attached client session.
-func (c *sessionClient) Send(ctx context.Context, p *EQApplication) {
+func (c *sessionClient) Send(ctx context.Context, ap streamPacket) {
 	// TODO: convert this to a ring buffer
 	select {
-	case c.handle <- p:
+	case c.handle <- ap:
 	case <-ctx.Done():
 	default:
-		slog.Error("failed to send to client", "client", c, "opcode", p.OpCode)
+		slog.Error("failed to send to client", "client", c, "opcode", ap.packet.OpCode)
 	}
 }
 
@@ -205,7 +218,8 @@ func (c *sessionClient) String() string {
 func (s *session) AddClient(ctx context.Context) (*sessionClient, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ch := make(chan *EQApplication, clientBuffer)
+	
+	ch := make(chan streamPacket, clientBuffer)
 	cinfo, ok := peer.FromContext(ctx)
 
 	var clientTag string

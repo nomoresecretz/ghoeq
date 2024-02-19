@@ -12,6 +12,7 @@ import (
 type decoder struct {
 	mu sync.RWMutex
 	om map[uint16]string
+	mo map[string]uint16
 }
 
 func (d *decoder) GetOp(op uint16) string {
@@ -21,10 +22,18 @@ func (d *decoder) GetOp(op uint16) string {
 	return s
 }
 
+func (d *decoder) GetOpByName(op string) uint16 {
+	d.mu.RLock()
+	s := d.mo[op]
+	d.mu.RUnlock()
+	return s
+}
+
 // NewDecoder returns an opcode to name decoder, possibly other functions in the future like deserialization.
 func NewDecoder() *decoder {
 	return &decoder{
 		om: make(map[uint16]string),
+		mo: make(map[string]uint16),
 	}
 }
 
@@ -50,6 +59,7 @@ func (d *decoder) LoadMap(file string) error {
 			return err
 		}
 		d.om[opCode] = sl[1]
+		d.mo[sl[1]] = opCode
 	}
 	return s.Err()
 }

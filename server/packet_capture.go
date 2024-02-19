@@ -6,6 +6,7 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
+	"github.com/nomoresecretz/ghoeq/common/eqOldPacket"
 )
 
 var (
@@ -19,11 +20,13 @@ type capture struct {
 
 // NewCapture returns a capture object capable of decoding client streams.
 func NewCapture(h *pcap.Handle) *capture {
-	layers.RegisterUDPPortLayerType(6000, OldEQOuterType)
-	layers.RegisterUDPPortLayerType(9000, OldEQOuterType)
+	layers.RegisterUDPPortLayerType(6000, eqOldPacket.OldEQOuterType)
+	layers.RegisterUDPPortLayerType(9000, eqOldPacket.OldEQOuterType)
+	
 	for i := range 400 {
-		layers.RegisterUDPPortLayerType(layers.UDPPort(7000+i), OldEQOuterType)
+		layers.RegisterUDPPortLayerType(layers.UDPPort(7000+i), eqOldPacket.OldEQOuterType)
 	}
+	
 	return &capture{s: gopacket.NewPacketSource(h, h.LinkType())}
 }
 

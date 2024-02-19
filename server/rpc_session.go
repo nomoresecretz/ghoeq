@@ -22,6 +22,7 @@ func (s *ghoeqServer) handleSessionRequest(ctx context.Context, r *pb.ModifyRequ
 	case pb.State_STATE_UNKNOWN:
 		return fmt.Errorf("unknown state requested")
 	}
+
 	return nil
 }
 
@@ -34,6 +35,7 @@ func (s *ghoeqServer) handleSessionStartRequest(ctx context.Context, r *pb.Modif
 	if src == "" || !s.validSource(src) {
 		return "", fmt.Errorf("a valid source is required")
 	}
+	
 	return s.startCapture(ctx, src)
 }
 
@@ -49,16 +51,21 @@ func (s *ghoeqServer) startCapture(ctx context.Context, src string) (string, err
 		src:       src,
 		mode:      "Start",
 	}
+
 	var reply string
+
 	for r := range rc {
 		if r.err != nil {
 			return "", r.err
 		}
+
 		u, ok := r.reply.(uuid.UUID)
 		if !ok {
 			return "", fmt.Errorf("invalid reply: %v", reply)
 		}
+
 		reply = u.String()
 	}
+
 	return reply, nil
 }

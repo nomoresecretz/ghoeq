@@ -74,10 +74,12 @@ message Client {
 
 message StreamThread {
     string id = 1;
-    uint32 port = 2;
+    string port = 2;
     string peer_address = 3;
-    uint32 peer_port = 4;
+    string peer_port = 4;
     PeerType type = 5;
+    string address = 6;
+    Direction direction = 7;
 }
 
 enum State {
@@ -90,7 +92,7 @@ message APPacket {
     uint64 seq = 1;
     uint32 op_code = 2;
     bytes data = 3;
-    string thread_ID = 4;
+    StreamThread streamInfo = 4;
 }
 
 message ClientPacket {}
@@ -103,4 +105,10 @@ enum PeerType {
     PEER_WORLD = 2;
     PEER_ZONE = 3;
     PEER_CHAT = 4;
+}
+
+enum Direction {
+    DIR_UNKNOWN = 0;
+    DIR_CLIENT_TO_SERVER = 1;
+    DIR_SERVER_TO_CLIENT = 2;
 }

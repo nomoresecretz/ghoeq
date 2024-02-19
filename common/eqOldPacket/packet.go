@@ -1,4 +1,4 @@
-package main
+package eqOldPacket
 
 import (
 	"encoding/binary"
@@ -9,27 +9,32 @@ import (
 	"github.com/gopacket/gopacket"
 )
 
-type fragHeader struct {
-	dwFragSEQ uint16
-	dwCurr    uint16
-	dwTotal   uint16
+// Create custom layer structure
+type OldEQOuter struct {
+	Flags      OldFlags
+	Seq      uint16
+	ARSP     uint16
+	ARQ      uint16
+	FragHeader FragHeader
+	AsqHigh    uint8
+	AsqLow     uint8
+	OpCode   []byte
+	Payload    []byte
+	CRC        uint32
+}
+
+type EQApplication struct {
+	OpCode  uint16
+	Payload []byte
+}
+
+type FragHeader struct {
+	FragSEQ uint16
+	Curr    uint16
+	Total   uint16
 }
 
 type OldFlags uint16
-
-// Create custom layer structure
-type OldEQOuter struct {
-	Flags    OldFlags
-	dwSeq    uint16
-	dwARSP   uint16
-	dwARQ    uint16
-	fh       fragHeader
-	asqHigh  uint8
-	asqLow   uint8
-	dwOpCode []byte
-	Payload  []byte
-	CRC      uint32
-}
 
 func (f OldFlags) HasFlag(c OldFlags) bool {
 	return f&c == c
@@ -91,7 +96,7 @@ const (
 var OldEQOuterType = gopacket.RegisterLayerType(
 	2010,
 	gopacket.LayerTypeMetadata{
-		Name: "OldEQOuterType",
+		Name:    "OldEQOuterType",
 		Decoder: gopacket.DecodeFunc(DecodeOldEQOuter),
 	},
 )
@@ -99,7 +104,7 @@ var OldEQOuterType = gopacket.RegisterLayerType(
 var EQApplicationType = gopacket.RegisterLayerType(
 	2011,
 	gopacket.LayerTypeMetadata{
-		Name: "EQApplicationType",
+		Name:    "EQApplicationType",
 		Decoder: gopacket.DecodeFunc(DecodeEQApp),
 	},
 )
@@ -130,8 +135,8 @@ func (l *OldEQOuter) LayerType() gopacket.LayerType {
 func (l *OldEQOuter) LayerContents() []byte {
 	var b []byte
 	binary.BigEndian.AppendUint16(b, uint16(l.Flags))
-	binary.BigEndian.AppendUint16(b, l.dwSeq)
-	b = append(b, l.dwOpCode...)
+	binary.BigEndian.AppendUint16(b, l.Seq)
+	b = append(b, l.OpCode...)
 	binary.BigEndian.AppendUint32(b, l.CRC)
 	return b
 }
@@ -146,48 +151,48 @@ func (l *OldEQOuter) LayerPayload() []byte {
 func (l *OldEQOuter) Dumper() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Flags: %s ", l.Flags)
-	fmt.Fprintf(&b, "Seq: %d ", l.dwSeq)
+	fmt.Fprintf(&b, "Seq: %d ", l.Seq)
 
-	if l.hasFlag(ARSP) {
-		fmt.Fprintf(&b, "dwARSP: %d ", l.dwARSP)
+	if l.HasFlag(ARSP) {
+		fmt.Fprintf(&b, "dwARSP: %d ", l.ARSP)
 	}
-	if l.hasFlag(ARQ) {
-		fmt.Fprintf(&b, "dwARQ: %d ", l.dwARQ)
-	}
-
-	if (l.fh != fragHeader{}) {
-		fmt.Fprintf(&b, "Frag{ %s } ", l.fh.String())
+	if l.HasFlag(ARQ) {
+		fmt.Fprintf(&b, "dwARQ: %d ", l.ARQ)
 	}
 
-	if l.hasFlag(ASQ) {
-		fmt.Fprintf(&b, "ASQ_Hi: %d ", l.asqHigh)
-		if l.hasFlag(ARQ) {
-			fmt.Fprintf(&b, "ASQ_Lo: %d ", l.asqLow)
+	if (l.FragHeader != FragHeader{}) {
+		fmt.Fprintf(&b, "Frag{ %s } ", l.FragHeader.String())
+	}
+
+	if l.HasFlag(ASQ) {
+		fmt.Fprintf(&b, "ASQ_Hi: %d ", l.AsqHigh)
+		if l.HasFlag(ARQ) {
+			fmt.Fprintf(&b, "ASQ_Lo: %d ", l.AsqLow)
 		}
 	}
 
-	if !l.ack() {
-		fmt.Fprintf(&b, "OpCode: %d ", l.dwOpCode)
+	if !l.Ack() {
+		fmt.Fprintf(&b, "OpCode: %d ", l.OpCode)
 	}
 
 	fmt.Fprintf(&b, "CRC: %#8x", l.CRC)
 	return b.String()
 }
 
-func (fh *fragHeader) String() string {
+func (fh *FragHeader) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "dwFragSEQ: %d ", fh.dwFragSEQ)
-	fmt.Fprintf(&b, "dwCurr: %d ", fh.dwCurr)
-	fmt.Fprintf(&b, "dwTotal: %d", fh.dwTotal)
+	fmt.Fprintf(&b, "dwFragSEQ: %d ", fh.FragSEQ)
+	fmt.Fprintf(&b, "dwCurr: %d ", fh.Curr)
+	fmt.Fprintf(&b, "dwTotal: %d", fh.Total)
 	return b.String()
 }
 
-func (l *OldEQOuter) ack() bool {
+func (l *OldEQOuter) Ack() bool {
 	// TODO
 	return false
 }
 
-func (l *OldEQOuter) hasFlag(f OldFlags) bool {
+func (l *OldEQOuter) HasFlag(f OldFlags) bool {
 	return l.Flags.HasFlag(f)
 }
 
@@ -196,47 +201,47 @@ func decodeOldPacket(data []byte) (*OldEQOuter, error) {
 	next := 0
 	p := &OldEQOuter{}
 	p.Flags = OldFlags(binary.BigEndian.Uint16(data[0:2]))
-	p.dwSeq = binary.BigEndian.Uint16(data[2:4])
+	p.Seq = binary.BigEndian.Uint16(data[2:4])
 	next += 4
-	if p.hasFlag(ARSP) {
-		p.dwARSP = binary.BigEndian.Uint16(data[next : next+2])
+	if p.HasFlag(ARSP) {
+		p.ARSP = binary.BigEndian.Uint16(data[next : next+2])
 		next += 2
 	}
-	if p.hasFlag(ARQ) {
-		p.dwARQ = binary.BigEndian.Uint16(data[next : next+2])
+	if p.HasFlag(ARQ) {
+		p.ARQ = binary.BigEndian.Uint16(data[next : next+2])
 		next += 2
 	}
-	if p.hasFlag(Frag) {
-		fr := fragHeader{}
-		fr.dwFragSEQ = binary.BigEndian.Uint16(data[next : next+2])
+	if p.HasFlag(Frag) {
+		fr := FragHeader{}
+		fr.FragSEQ = binary.BigEndian.Uint16(data[next : next+2])
 		next += 2
-		fr.dwCurr = binary.BigEndian.Uint16(data[next : next+2])
+		fr.Curr = binary.BigEndian.Uint16(data[next : next+2])
 		next += 2
-		fr.dwTotal = binary.BigEndian.Uint16(data[next : next+2])
+		fr.Total = binary.BigEndian.Uint16(data[next : next+2])
 		next += 2
-		p.fh = fr
+		p.FragHeader = fr
 	}
 
-	if p.hasFlag(ASQ) {
-		p.asqHigh = data[next]
+	if p.HasFlag(ASQ) {
+		p.AsqHigh = data[next]
 		next += 1
-		if p.hasFlag(ARQ) {
-			p.asqLow = data[next]
+		if p.HasFlag(ARQ) {
+			p.AsqLow = data[next]
 			next += 1
 		}
 	}
 
 	p.CRC = binary.BigEndian.Uint32(data[len(data)-4:])
 
-	if p.hasFlag(Frag) {
-		f := p.fh
-		slog.Debug("fragment", "cur", f.dwCurr, "ttl", f.dwTotal, "seq", f.dwFragSEQ)
+	if p.HasFlag(Frag) {
+		f := p.FragHeader
+		slog.Debug("fragment", "cur", f.Curr, "ttl", f.Total, "seq", f.FragSEQ)
 	}
 	remain := len(data) - next - 4
 	adj := 0
-	if remain >= 2 && (!p.hasFlag(Frag) || p.fh.dwCurr == 0) {
-		p.dwOpCode = append(p.dwOpCode, data[next:next+2]...)
-		if p.dwOpCode[0] == 0x5f && p.dwOpCode[1] == 0x41 {
+	if remain >= 2 && (!p.HasFlag(Frag) || p.FragHeader.Curr == 0) {
+		p.OpCode = append(p.OpCode, data[next:next+2]...)
+		if p.OpCode[0] == 0x5f && p.OpCode[1] == 0x41 {
 			slog.Debug(p.Dumper())
 		}
 		next += 2
@@ -254,11 +259,6 @@ func decodeOldPacket(data []byte) (*OldEQOuter, error) {
 		return nil, fmt.Errorf("invalid packet size, got %d, want %d", next, len(data))
 	}
 	return p, nil
-}
-
-type EQApplication struct {
-	OpCode  uint16
-	Payload []byte
 }
 
 func decodeEQAppPacket(data []byte) (*EQApplication, error) {

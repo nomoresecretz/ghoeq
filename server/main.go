@@ -17,7 +17,6 @@ import (
 )
 
 var (
-	// cFile    = flag.String("file", "", "Prior capture file")
 	opMap    = flag.String("opFile", "", "File with opcode mappings")
 	port     = flag.Uint("port", 6420, "port to listen on for connections")
 	bindAddr = flag.String("bindAddr", "", "Network bind address")
@@ -32,6 +31,7 @@ func (i *arrayFlags) String() string {
 
 func (i *arrayFlags) Set(value string) error {
 	*i = append(*i, value)
+
 	return nil
 }
 
@@ -42,6 +42,7 @@ var cDev arrayFlags
 func main() {
 	flag.Var(&cDev, "device", "Device(s) to capture")
 	flag.Parse()
+
 	err := doStuff(context.Background())
 	if err != nil {
 		slog.Error("failed to start server", "error", err)
@@ -54,8 +55,10 @@ func doStuff(ctx context.Context) error {
 	if len(cDev) == 0 {
 		return fmt.Errorf("please specify allowed capture interfaces, ideally just 1")
 	}
+
 	ctx, ctxcf := context.WithCancel(ctx)
 	defer ctxcf()
+
 	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *bindAddr, *port))
 	if err != nil {
 		return err
@@ -63,10 +66,12 @@ func doStuff(ctx context.Context) error {
 
 	var ops []grpc.ServerOption
 	grpc := grpc.NewServer(ops...)
+	
 	gs, err := NewGhoeqServer(ctx)
 	if err != nil {
 		return err
 	}
+
 	pb.RegisterBackendServerServer(grpc, gs)
 
 	cctx, _ := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -78,9 +83,11 @@ func doStuff(ctx context.Context) error {
 				gs.GracefulStop()
 				grpc.GracefulStop()
 				ctxcf()
+
 				return nil
 			case <-wctx.Done():
 				grpc.GracefulStop()
+
 				return nil
 			}
 		}
@@ -91,6 +98,7 @@ func doStuff(ctx context.Context) error {
 
 	eg.Go(func() error {
 		slog.Info("Starting server")
+		
 		return grpc.Serve(l)
 	})
 

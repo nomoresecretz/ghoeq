@@ -24,4 +24,13 @@ linters:
     #- gci
     #- gofmt
     #- goimports
+    - lll
 #skip-cache: true
+linters-settings:
+  depguard:
+    rules:
+      main:
+        list-mode: lax
+        allow:
+          - github.com/gopacket/*
+          - github.com/nomoresecretz/ghoeq/*

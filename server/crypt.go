@@ -39,6 +39,7 @@ func (c *crypter) getCypher(s string) (cypher.Cypher, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s : %w", s, ErrNoCypher)
 	}
+	
 	return cy, nil
 }
 
@@ -48,14 +49,17 @@ func (c *crypter) Decrypt(s string, data []byte) ([]byte, error) {
 	if s == "OP_CharInventory" || s == "OP_ShopInventoryPacket" || s == "OP_SpawnDoor" {
 		skipHeader = 2
 	}
+
 	cy, err := c.getCypher(s)
 	if err != nil {
 		return nil, err
 	}
+
 	la := len(data) - skipHeader
 	cb := cypher.NewCBox(la, cy)
 	cb.Seed()
 	cb.Fill(data[skipHeader:])
+
 	for k := 0; k < cb.Len(); k++ {
 		cb.WalkInvert()
 	}
@@ -67,10 +71,13 @@ func (c *crypter) Decrypt(s string, data []byte) ([]byte, error) {
 		cb.Flip(0)
 		cb.Flip(1)
 	}
+
 	z, err := zlib.NewReader(cb.NewReader(0))
 	if err != nil {
 		return nil, fmt.Errorf("error decrypting (%s): %w", s, err)
 	}
+
 	defer z.Close()
+
 	return io.ReadAll(z)
 }

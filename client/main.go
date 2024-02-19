@@ -76,7 +76,9 @@ func doStuff(ctx context.Context) error {
 			op = fmt.Sprintf("%#4x", opRaw)
 		}
 		// TODO: move opcode decoder to independent common module. Add api to push/pull from server.
-		fmt.Printf("Packet %#4X : OpCode %s %s", 0x0, op, spew.Sdump(p.GetData()))
+		si := p.GetStreamInfo()
+		fmt.Printf("StreamInfo %s %s %s:%s->%s:%s\n", si.GetType().String(), si.GetDirection(), si.GetAddress(), si.GetPort(), si.GetPeerAddress(), si.GetPeerPort())
+		fmt.Printf("Packet %#4X : OpCode %s %s\n", 0x0, op, spew.Sdump(p.GetData()))
 	}
 
 	return nil
