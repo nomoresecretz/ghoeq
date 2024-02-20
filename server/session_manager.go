@@ -23,16 +23,16 @@ type sessionRequest struct {
 }
 
 type sessionMgr struct {
-	muSessions sync.RWMutex
-	ctrlChan   chan<- *sessionRequest
-	sessions   map[uuid.UUID]*session
-	parent     *ghoeqServer
+	muSessions  sync.RWMutex
+	ctrlChan    chan<- *sessionRequest
+	sessions    map[uuid.UUID]*session
+	parent      *ghoeqServer
 	clientWatch *gameClientWatch
 }
 
 func NewSessionManager() *sessionMgr {
 	return &sessionMgr{
-		sessions: make(map[uuid.UUID]*session),
+		sessions:    make(map[uuid.UUID]*session),
 		clientWatch: NewClientWatch(),
 	}
 }
@@ -85,7 +85,7 @@ func (sm *sessionMgr) handleRequest(ctx context.Context, r *sessionRequest, g *e
 		g.Go(func() error {
 			return sm.runCapture(ctx, r.src, r.replyChan) // TODO: test capture first so we can return error to client instead of killing server. :)
 		})
-		
+
 		return nil
 	case "Stop":
 		r.replyChan <- replyStruct{
@@ -101,7 +101,7 @@ func (sm *sessionMgr) handleRequest(ctx context.Context, r *sessionRequest, g *e
 func (sm *sessionMgr) runCapture(ctx context.Context, src string, c chan<- replyStruct) error {
 	sm.muSessions.Lock()
 	index := sm.genSessionID()
-	s := NewSession(index, src)
+	s := NewSession(index, src, sm)
 	sm.sessions[index] = s
 	sm.muSessions.Unlock()
 
@@ -129,4 +129,5 @@ func (sm *sessionMgr) GracefulStop() {
 	for _, ses := range sm.sessions {
 		ses.Close()
 	}
+	sm.clientWatch.GracefulStop()
 }

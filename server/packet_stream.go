@@ -45,6 +45,7 @@ func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<-
 	streamFactory := NewStreamFactory(sm, cout, wg)
 	streamPool := assembler.NewStreamPool(streamFactory)
 	streamAsm := assembler.NewAssembler(streamPool)
+	defer streamFactory.Close()
 
 	c := NewCapture(h)
 	pChan := c.Packets()
@@ -100,4 +101,12 @@ func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<-
 	}
 
 	return nil
+}
+
+func (sm *streamMgr) Close() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for _, s := range sm.clientStreams {
+		s.Close()
+	}
 }

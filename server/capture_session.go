@@ -27,12 +27,14 @@ type session struct {
 	lastClient time.Time
 	source     string
 	sm         *streamMgr
+	mgr        *sessionMgr
 }
 
-func NewSession(id uuid.UUID, src string) *session {
+func NewSession(id uuid.UUID, src string, sm *sessionMgr) *session {
 	return &session{
 		id:     id,
 		source: src,
+		mgr:    sm,
 	}
 }
 
@@ -54,7 +56,7 @@ func (s *session) Run(ctx context.Context, src string) error {
 
 	// TODO: replace this with lockless ring buffer.
 	apc := make(chan streamPacket, fanBuffer)
-	sm := NewStreamMgr(d, s.sm.clientWatch)
+	sm := NewStreamMgr(d, s.mgr.clientWatch)
 	s.sm = sm
 
 	wg, wctx := errgroup.WithContext(ctx)
@@ -69,6 +71,8 @@ func (s *session) Run(ctx context.Context, src string) error {
 		return sm.NewCapture(wctx, h, apc, wg)
 	})
 	wg.Go(func() error {
+		defer sm.Close()
+
 		return s.processPackets(wctx, apc)
 	})
 

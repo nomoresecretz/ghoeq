@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,18 +24,21 @@ type gameClientWatch struct {
 	mu        sync.RWMutex
 	clients   map[uuid.UUID]*gameClient
 	predicted map[string]predictEntry
-	rpcClients any
+	ping      chan struct{}
 }
 
 type gameClient struct {
 	id      uuid.UUID
 	mu      sync.RWMutex
 	streams map[uuid.UUID]*stream
+	epoch   atomic.Uint32
+	ping    chan struct{}
 }
 
 func NewClientWatch() *gameClientWatch {
 	return &gameClientWatch{
 		clients: make(map[uuid.UUID]*gameClient),
+		ping:    make(chan struct{}),
 	}
 }
 
@@ -40,9 +46,12 @@ func (c *gameClientWatch) newClient() *gameClient {
 	gc := &gameClient{
 		id:      uuid.New(),
 		streams: make(map[uuid.UUID]*stream),
+		ping:    make(chan struct{}),
 	}
 	c.mu.Lock()
 	c.clients[gc.id] = gc
+	close(c.ping)
+	c.ping = make(chan struct{})
 	c.mu.Unlock()
 	return gc
 }
@@ -69,6 +78,23 @@ func (c *gameClientWatch) Check(p streamPacket) bool {
 	return false
 }
 
+func (c *gameClientWatch) GracefulStop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	close(c.ping)
+	c.ping = nil
+	for _, gc := range c.clients {
+		gc.Close()
+	}
+}
+
+func (c *gameClient) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	close(c.ping)
+	c.ping = nil
+}
+
 func (c *gameClient) Run(p streamPacket) {
 }
 
@@ -79,4 +105,41 @@ func (c *gameClientWatch) Run(p streamPacket) {
 	if c.Check(p) {
 		c.Run(p)
 	}
+}
+
+// WaitForClient obtains a named client, or can block waiting for first avaliable.
+func (c *gameClientWatch) WaitForClient(ctx context.Context, id string) (*gameClient, error) {
+	if id == "" {
+		c.mu.RLock()
+		p := c.ping
+		l := len(c.clients)
+		c.mu.RUnlock()
+		if l == 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-p:
+			}
+			c.mu.RLock()
+			for k := range c.clients {
+				id = k.String()
+			}
+			c.mu.RUnlock()
+		}
+	}
+
+	uId, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid id format: %w", err)
+	}
+
+	c.mu.RLock()
+	cli, ok := c.clients[uId]
+	c.mu.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("unknown game client %s", id)
+	}
+
+	return cli, nil
 }

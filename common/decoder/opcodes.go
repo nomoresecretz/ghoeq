@@ -17,15 +17,21 @@ type decoder struct {
 
 func (d *decoder) GetOp(op uint16) string {
 	d.mu.RLock()
-	s := d.om[op]
+	s, ok := d.om[op]
 	d.mu.RUnlock()
+	if !ok {
+		return ""
+	}
 	return s
 }
 
 func (d *decoder) GetOpByName(op string) uint16 {
 	d.mu.RLock()
-	s := d.mo[op]
+	s, ok := d.mo[op]
 	d.mu.RUnlock()
+	if !ok {
+		return 0
+	}
 	return s
 }
 

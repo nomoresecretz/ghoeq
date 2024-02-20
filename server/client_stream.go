@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/peer"
 
 	"github.com/nomoresecretz/ghoeq/common/eqOldPacket"
+	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
 	"github.com/nomoresecretz/ghoeq/common/ringbuffer"
 	"github.com/nomoresecretz/ghoeq/server/assembler"
 )
@@ -112,10 +113,6 @@ func (sf *streamFactory) New(ctx context.Context, netFlow, portFlow gopacket.Flo
 	return s
 }
 
-func (s *stream) Accept(p gopacket.Layer, ci gopacket.CaptureInfo, dir assembler.FlowDirection, nSeq assembler.Sequence, start *bool, ac assembler.AssemblerContext) bool {
-	return true
-}
-
 func NewStreamFactory(sm *streamMgr, cout chan<- streamPacket, wg *errgroup.Group) *streamFactory {
 	oc := make(map[string]uint16)
 	for k := range ocList {
@@ -130,9 +127,25 @@ func NewStreamFactory(sm *streamMgr, cout chan<- streamPacket, wg *errgroup.Grou
 	}
 }
 
+func (sf *streamFactory) Close() {
+	sf.mgr.Close()
+}
+
 func (s *stream) Clean() {
 	// TODO: clean up dead stream.
 	panic("unimplemented")
+}
+
+func (s *stream) Proto() *pb.Stream {
+	return &pb.Stream{
+		Id:          s.key.String(),
+		Address:     s.net.Src().String(),
+		Port:        s.port.String(),
+		PeerAddress: s.net.Dst().String(),
+		PeerPort:    s.port.Dst().String(),
+		Type:        pb.PeerType(s.sType),
+		Direction:   pb.Direction(s.dir),
+	}
 }
 
 func (s *stream) Send(ctx context.Context, l gopacket.Layer, seq uint16) error {
@@ -146,6 +159,10 @@ func (s *stream) Send(ctx context.Context, l gopacket.Layer, seq uint16) error {
 
 func (s *stream) Close() {
 	close(s.ch)
+}
+
+func (s *stream) Accept(p gopacket.Layer, ci gopacket.CaptureInfo, dir assembler.FlowDirection, nSeq assembler.Sequence, start *bool, ac assembler.AssemblerContext) bool {
+	return true
 }
 
 func (s *stream) FanOut(ctx context.Context, p streamPacket) error {

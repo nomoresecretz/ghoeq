@@ -55,28 +55,27 @@ func doStuff(ctx context.Context) error {
 
 	eg, gctx := errgroup.WithContext(ctx)
 
-	newStream := func(s *pb.StreamThread) {
+	newStream := func(s *pb.Stream) {
 		slog.Info("new client stream",
-		"type", s.GetType().String(),
-		"dir", s.GetDirection(),
-		"port", s.GetPort(),
-		"peer_addr", s.GetPeerAddress(),
-		"peer_port", s.GetPeerPort())
+			"type", s.GetType().String(),
+			"dir", s.GetDirection(),
+			"port", s.GetPort(),
+			"peer_addr", s.GetPeerAddress(),
+			"peer_port", s.GetPeerPort())
 		eg.Go(func() error {
 			return followStream(gctx, s, c, d)
 		})
 	}
 
-	sID, err := getSessionID(ctx, c)
+	// confirm we have a running capture.
+	_, err = getSessionID(ctx, c)
 	if err != nil {
 		return err
 	}
 
 	eg.Go(func() error {
 		var client *pb.Client
-		cs, err := c.AttachClient(ctx, &pb.AttachClientRequest{
-			SessionId: sID,
-		})
+		cs, err := c.AttachClient(ctx, &pb.AttachClientRequest{})
 		if err != nil {
 			return err
 		}
@@ -89,11 +88,11 @@ func doStuff(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if cli := c.GetClient(); cli != nil {
+			if cli := c.GetClient(); client == nil && cli != nil {
 				client = cli
 				slog.Info("attached to new client", "address", client.Address, "ID", client.Id)
 			}
-			for _, s := range c.GetStreamThreads() {
+			for _, s := range c.GetStreams() {
 				newStream(s)
 			}
 		}
@@ -103,7 +102,7 @@ func doStuff(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func followStream(ctx context.Context, stream *pb.StreamThread, c pb.BackendServerClient, d dec) error {
+func followStream(ctx context.Context, stream *pb.Stream, c pb.BackendServerClient, d dec) error {
 	var err error
 	s, err := c.AttachStreamRaw(ctx, &pb.AttachStreamRawRequest{
 		Id:    stream.GetId(),

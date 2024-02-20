@@ -110,8 +110,18 @@ func (s *ghoeqServer) ListStreams(ctx context.Context, r *pb.ListStreamRequest) 
 	}
 
 	sess.mu.RLock()
+	streamId := r.GetStreamId()
+	
+	var streams []*pb.Stream
+	for _, str := range sess.sm.clientStreams {
+		if streamId != "" && streamId != str.key.String() {
+			continue
+		}
+		streams = append(streams, str.Proto())
+	}
+	sess.mu.RUnlock()
 
-	return nil, fmt.Errorf("unimplemented")
+	return &pb.ListStreamsResponse{Streams: streams}, nil
 }
 
 func (s *ghoeqServer) ModifySession(ctx context.Context, r *pb.ModifySessionRequest) (*pb.SessionResponse, error) {
@@ -124,9 +134,67 @@ func (s *ghoeqServer) ModifySession(ctx context.Context, r *pb.ModifySessionRequ
 	return &pb.SessionResponse{}, nil
 }
 
-// AttachStreamRaw provides a single full client stream of decrypted but unprocessed EQApplication packets.
+// AttachClient notifies of new streams for a given client track.
 func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendServer_AttachClientServer) error {
-	return fmt.Errorf("unimplemented")
+	ctx := stream.Context()
+
+	cli, err := s.sMgr.clientWatch.WaitForClient(ctx, r.GetClientId())
+	if err != nil {
+		return err
+	}
+
+	var cupd *pb.Client
+	if r.GetClientId() == "" {
+		cupd = &pb.Client{
+			Id: string(cli.id.String()),
+			//Address: cli., // TODO: add client address logic.
+		}
+	}
+	r1 := &pb.ClientUpdate{
+		Client: cupd,
+	}
+	
+	seen := make(map[string]struct{})
+
+	var strz []*pb.Stream
+	cli.mu.RLock()
+	for _, v := range cli.streams {
+		streamProto := v.Proto()
+		strz = append(strz, streamProto)
+		seen[streamProto.Id] = struct{}{}
+	}
+	cli.mu.RUnlock()
+
+	r1.Streams = strz
+	if err := stream.Send(r1); err != nil {
+		return err
+	}
+
+	var p chan struct{}
+	cli.mu.RLock()
+	p = cli.ping
+	cli.mu.RUnlock()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-p:
+			cli.mu.RLock()
+			p = cli.ping
+
+			var strz []*pb.Stream
+			for _, v := range cli.streams {
+				streamProto := v.Proto()
+				if _, ok := seen[streamProto.Id]; ok {
+					continue
+				}
+				strz = append(strz, streamProto)
+				seen[streamProto.Id] = struct{}{}
+			}
+			stream.Send(&pb.ClientUpdate{Streams: strz})
+		}
+	}
 }
 
 // AttachStreamRaw provides a single full client stream of decrypted but unprocessed EQApplication packets.
@@ -170,7 +238,7 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRawRequest, stream pb.Ba
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case p, ok := <-cStream.handle:
 			if !ok {
 				return nil

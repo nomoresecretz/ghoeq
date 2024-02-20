@@ -17,11 +17,10 @@ service BackendServer {
 
 message AttachClientRequest {
     string client_id = 1;
-    string session_id = 2;
 }
 
 message ClientUpdate {
-    repeated StreamThread stream_threads = 1;
+    repeated Stream streams = 1;
     Client client = 2; // Offered on first avail
 }
 
@@ -78,12 +77,12 @@ message Source {
     string description = 2;
 }
 
-message Stream {
+message GameStream {
     uint32 id = 1;
     reserved 2; //deprecated
     //google.protobuf.DateTime first_seen = 3;
     Client client = 4;
-    repeated StreamThread sessions = 5;
+    repeated Stream sessions = 5;
 }
 
 message Client {
@@ -91,7 +90,7 @@ message Client {
     string address = 2;
 }
 
-message StreamThread {
+message Stream {
     string id = 1;
     string port = 2;
     string peer_address = 3;
@@ -99,6 +98,7 @@ message StreamThread {
     PeerType type = 5;
     string address = 6;
     Direction direction = 7;
+    Session session = 8;
 }
 
 enum State {
