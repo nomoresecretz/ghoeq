@@ -54,7 +54,7 @@ func (s *session) Run(ctx context.Context, src string) error {
 
 	// TODO: replace this with lockless ring buffer.
 	apc := make(chan streamPacket, fanBuffer)
-	sm := NewStreamMgr(d)
+	sm := NewStreamMgr(d, s.sm.clientWatch)
 	s.sm = sm
 
 	wg, wctx := errgroup.WithContext(ctx)
@@ -150,7 +150,12 @@ func (s *session) processPackets(ctx context.Context, cin <-chan streamPacket) e
 		}
 
 		if p.stream.sType == ST_UNKNOWN {
-			p.stream.Identify(ctx, p.packet)
+			slog.Error("unknown packet stream", "packet", p)
+		}
+		if p.stream.gameClient != nil {
+			p.stream.gameClient.Run(p)
+		} else {
+			s.sm.clientWatch.Run(p)
 		}
 		if err := p.stream.FanOut(ctx, p); err != nil {
 			return err

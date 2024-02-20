@@ -61,14 +61,15 @@ const (
 )
 
 type stream struct {
-	key   assembler.Key
-	net   gopacket.Flow
-	port  gopacket.Flow
-	dir   assembler.FlowDirection
-	rb    *ringbuffer.RingBuffer[*eqOldPacket.EQApplication]
-	sType streamType
-	sf    *streamFactory
-	ch    chan<- streamPacket
+	key        assembler.Key
+	net        gopacket.Flow
+	port       gopacket.Flow
+	dir        assembler.FlowDirection
+	rb         *ringbuffer.RingBuffer[*eqOldPacket.EQApplication]
+	sType      streamType
+	sf         *streamFactory
+	ch         chan<- streamPacket
+	gameClient *gameClient
 
 	mu                sync.RWMutex
 	seq               uint64
@@ -174,7 +175,7 @@ func (s *stream) HandleAppPacket(ctx context.Context, p *eqOldPacket.EQApplicati
 	return nil
 }
 
-func (s *stream) Identify(ctx context.Context, p *eqOldPacket.EQApplication) {
+func (s *stream) Identify(p *eqOldPacket.EQApplication) {
 	switch p.OpCode {
 	case s.sf.oc["OP_LoginPC"]:
 		s.dir = assembler.DirClientToServer
@@ -200,7 +201,7 @@ func (s *stream) Identify(ctx context.Context, p *eqOldPacket.EQApplication) {
 	if s.sType == ST_UNKNOWN {
 		rev := s.key.Reverse()
 		s.sf.mgr.mu.RLock()
-	
+
 		// Just mirror our mate if it exists.
 		rstrm, ok := s.sf.mgr.clientStreams[rev]
 		if ok && rstrm.sType != ST_UNKNOWN {
@@ -208,10 +209,8 @@ func (s *stream) Identify(ctx context.Context, p *eqOldPacket.EQApplication) {
 			s.sType = rstrm.sType
 		}
 		s.sf.mgr.mu.RUnlock()
-	
-	}
 
-	// TODO: Actual predictive client tracking based on packet contents.
+	}
 }
 
 func (s *stream) AttachToStream(ctx context.Context) (*streamClient, error) {

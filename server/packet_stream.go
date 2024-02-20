@@ -19,6 +19,7 @@ type streamMgr struct {
 	mu            sync.RWMutex
 	clientStreams map[assembler.Key]*stream
 	streamMap map[string]assembler.Key
+	clientWatch *gameClientWatch
 }
 
 type opDecoder interface {
@@ -26,11 +27,12 @@ type opDecoder interface {
 	GetOpByName(string) uint16
 }
 
-func NewStreamMgr(d opDecoder) *streamMgr {
+func NewStreamMgr(d opDecoder, cw *gameClientWatch) *streamMgr {
 	return &streamMgr{
 		clientStreams: make(map[assembler.Key]*stream),
 		streamMap: make(map[string]assembler.Key),
 		decoder:       d,
+		clientWatch: cw,
 	}
 }
 

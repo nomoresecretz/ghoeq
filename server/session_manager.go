@@ -27,11 +27,13 @@ type sessionMgr struct {
 	ctrlChan   chan<- *sessionRequest
 	sessions   map[uuid.UUID]*session
 	parent     *ghoeqServer
+	clientWatch *gameClientWatch
 }
 
 func NewSessionManager() *sessionMgr {
 	return &sessionMgr{
 		sessions: make(map[uuid.UUID]*session),
+		clientWatch: NewClientWatch(),
 	}
 }
 
