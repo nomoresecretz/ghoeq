@@ -17,6 +17,7 @@ service BackendServer {
 
 message AttachClientRequest {
     string client_id = 1;
+    string session_id = 2;
 }
 
 message ClientUpdate {

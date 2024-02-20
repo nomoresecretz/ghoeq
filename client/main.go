@@ -67,9 +67,16 @@ func doStuff(ctx context.Context) error {
 		})
 	}
 
+	sID, err := getSessionID(ctx, c)
+	if err != nil {
+		return err
+	}
+
 	eg.Go(func() error {
 		var client *pb.Client
-		cs, err := c.AttachClient(ctx, &pb.AttachClientRequest{})
+		cs, err := c.AttachClient(ctx, &pb.AttachClientRequest{
+			SessionId: sID,
+		})
 		if err != nil {
 			return err
 		}
@@ -133,4 +140,55 @@ func followStream(ctx context.Context, stream *pb.StreamThread, c pb.BackendServ
 		fmt.Printf("Packet %#4X : OpCode %s %s\n", 0x0, op, spew.Sdump(p.GetData()))
 	}
 	return nil
+}
+
+func getSessionID(ctx context.Context, c pb.BackendServerClient) (string, error) {
+	s, err := c.ListSession(ctx, &pb.ListRequest{})
+	if err != nil {
+		return "", err
+	}
+	if len(s.Sessions) == 0 {
+		src, err := getSource(ctx, c)
+		if err != nil {
+			return "", err
+		}
+		_, err = c.ModifySession(ctx, &pb.ModifySessionRequest{
+			Nonce: "0",
+			Mods: []*pb.ModifyRequest{
+				{
+					State:  pb.State_STATE_START,
+					Source: src,
+				},
+			},
+		})
+		if err != nil {
+			return "", err
+		}
+		s, err = c.ListSession(ctx, &pb.ListRequest{})
+		if err != nil {
+			return "", err
+		}
+	}
+	switch l := len(s.GetSessions()); {
+	case l == 0:
+		return "", fmt.Errorf("no capture session avaliable")
+	case l > 1:
+		return "", fmt.Errorf("too many active sessions to pick one. select manually")
+	}
+	return s.GetSessions()[0].GetId(), nil
+}
+
+func getSource(ctx context.Context, c pb.BackendServerClient) (string, error) {
+	if *src != "" {
+		return *src, nil
+	}
+	s, err := c.ListSources(ctx, &pb.ListRequest{})
+	if err != nil {
+		return "", err
+	}
+	sources := s.GetSources()
+	if len(sources) != 1 {
+		return "", fmt.Errorf("too many sources, pick one manually")
+	}
+	return sources[0].GetId(), nil
 }

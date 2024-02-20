@@ -195,6 +195,22 @@ func (s *stream) Identify(ctx context.Context, p *eqOldPacket.EQApplication) {
 		s.dir = assembler.DirServerToClient
 		s.sType = ST_ZONE
 	}
+
+	// still unknown, lets check for our mate.
+	if s.sType == ST_UNKNOWN {
+		rev := s.key.Reverse()
+		s.sf.mgr.mu.RLock()
+	
+		// Just mirror our mate if it exists.
+		rstrm, ok := s.sf.mgr.clientStreams[rev]
+		if ok && rstrm.sType != ST_UNKNOWN {
+			s.dir = rstrm.dir.Reverse()
+			s.sType = rstrm.sType
+		}
+		s.sf.mgr.mu.RUnlock()
+	
+	}
+
 	// TODO: Actual predictive client tracking based on packet contents.
 }
 

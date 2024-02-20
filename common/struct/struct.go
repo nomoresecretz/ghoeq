@@ -12,6 +12,7 @@ type EQType uint32
 const (
 	EQT_Unknown EQType = iota
 	EQT_PlayerProfile
+	EQT_PlayEverquestResponse
 )
 
 type EQStruct interface {
