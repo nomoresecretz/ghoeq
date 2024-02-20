@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,6 +54,7 @@ func (c *gameClientWatch) newClient() *gameClient {
 	close(c.ping)
 	c.ping = make(chan struct{})
 	c.mu.Unlock()
+	slog.Debug("new game client tracked", "client", gc)
 	return gc
 }
 

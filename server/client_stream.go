@@ -107,6 +107,7 @@ func (sf *streamFactory) New(ctx context.Context, netFlow, portFlow gopacket.Flo
 	sf.mgr.clientStreams[key] = s
 	sf.mgr.streamMap[key.String()] = key
 	sf.mgr.mu.Unlock()
+	slog.Debug("tracking new stream", "stream", s.Proto())
 	sf.wg.Go(func() error {
 		return s.handleClients(ctx, ch)
 	})
@@ -214,6 +215,10 @@ func (s *stream) Identify(p *eqOldPacket.EQApplication) {
 		s.sType = ST_ZONE
 	}
 
+	if s.sType != ST_UNKNOWN {
+		slog.Debug("identified stream type", "stream", s.key.String(), "type", s.sType.String(), "direction", s.dir.String())
+	}
+
 	// still unknown, lets check for our mate.
 	if s.sType == ST_UNKNOWN {
 		rev := s.key.Reverse()
@@ -224,6 +229,7 @@ func (s *stream) Identify(p *eqOldPacket.EQApplication) {
 		if ok && rstrm.sType != ST_UNKNOWN {
 			s.dir = rstrm.dir.Reverse()
 			s.sType = rstrm.sType
+			slog.Debug("identified stream by mate", "stream", s.key.String())
 		}
 		s.sf.mgr.mu.RUnlock()
 

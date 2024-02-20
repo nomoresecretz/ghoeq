@@ -20,6 +20,7 @@ var (
 	opMap    = flag.String("opFile", "", "File with opcode mappings")
 	port     = flag.Uint("port", 6420, "port to listen on for connections")
 	bindAddr = flag.String("bindAddr", "", "Network bind address")
+	debugFlag = flag.Bool("debug", false, "enable debugging")
 )
 
 // arrayFlags is used as a multivalue input.
@@ -43,6 +44,14 @@ func main() {
 	flag.Var(&cDev, "device", "Device(s) to capture")
 	flag.Parse()
 
+	if *debugFlag {
+		opts := &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}
+		h := slog.New(slog.NewTextHandler(os.Stdout, opts))
+		slog.SetDefault(h)
+
+	}
 	err := doStuff(context.Background())
 	if err != nil {
 		slog.Error("failed to start server", "error", err)
