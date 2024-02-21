@@ -51,7 +51,13 @@ func (dir FlowDirection) String() string {
 
 // Reverse returns the reversed direction.
 func (dir FlowDirection) Reverse() FlowDirection {
-	return ((dir + 1) % 2) + 1
+	switch dir {
+	case DirClientToServer:
+		return DirServerToClient
+	case DirServerToClient:
+		return DirClientToServer
+	}
+	return dir
 }
 
 func (p *streamPool) newConnection(ctx context.Context, k Key, s Stream, ts time.Time) (c *connection) {
@@ -73,26 +79,37 @@ func (s *streamPool) cleaner(ctx context.Context, c *connection) {
 		select {
 		case <-ctx.Done():
 		case <-t:
-			c.mu.RLock()
-			ls := c.lastSeen
-			c.mu.RUnlock()
+			var ret bool
 
-			if time.Since(ls) > streamTimeout {
-				s.mu.Lock()
-				delete(s.conns, c.key)
-				s.mu.Unlock()
-				c.Clean()
-
+			t, ret = s.clean(c, &t)
+			if ret {
 				return
 			}
-
-			c.mu.RLock()
-			remain := time.Since(c.lastSeen)
-			c.mu.RUnlock()
-
-			t = time.After(streamTimeout - remain)
 		}
 	}
+}
+
+func (s *streamPool) clean(c *connection, t *<-chan time.Time) (<-chan time.Time, bool) {
+	c.mu.RLock()
+	ls := c.lastSeen
+	c.mu.RUnlock()
+
+	if time.Since(ls) > streamTimeout {
+		s.mu.Lock()
+		delete(s.conns, c.key)
+		s.mu.Unlock()
+		c.Clean()
+
+		return nil, true
+	}
+
+	c.mu.RLock()
+	remain := time.Since(c.lastSeen)
+	c.mu.RUnlock()
+
+	*t = time.After(streamTimeout - remain)
+
+	return *t, false
 }
 
 func (c *connection) Clean() {

@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/peer"
 
+	"github.com/nomoresecretz/ghoeq/common/decoder"
 	"github.com/nomoresecretz/ghoeq/common/eqOldPacket"
 	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
 	"github.com/nomoresecretz/ghoeq/common/ringbuffer"
@@ -24,6 +25,7 @@ var now = func() time.Time {
 
 var ocList = map[string]struct{}{
 	"OP_LoginPC":       {},
+	"OP_SessionReady":  {},
 	"OP_LoginAccepted": {},
 	"OP_SendLoginInfo": {},
 	"OP_LogServer":     {},
@@ -33,8 +35,8 @@ var ocList = map[string]struct{}{
 
 type streamFactory struct {
 	mgr  *streamMgr
-	cout chan<- streamPacket
-	oc   map[string]uint16
+	cout chan<- StreamPacket
+	oc   map[string]decoder.OpCode
 	wg   *errgroup.Group
 }
 
@@ -69,7 +71,6 @@ type stream struct {
 	rb         *ringbuffer.RingBuffer[*eqOldPacket.EQApplication]
 	sType      streamType
 	sf         *streamFactory
-	ch         chan<- streamPacket
 	gameClient *gameClient
 
 	mu                sync.RWMutex
@@ -77,21 +78,25 @@ type stream struct {
 	created, lastSeen time.Time
 	clients           map[uuid.UUID]*streamClient
 	lastClient        time.Time
+
+	once sync.Once
+	ch   chan<- StreamPacket
 }
 
 const (
 	packetBufferSize = 20
 )
 
-type streamPacket struct {
+type StreamPacket struct {
 	stream *stream
 	packet *eqOldPacket.EQApplication
 	seq    uint64
+	opCode decoder.OpCode
 }
 
 func (sf *streamFactory) New(ctx context.Context, netFlow, portFlow gopacket.Flow, l gopacket.Layer, ac assembler.AssemblerContext) assembler.Stream {
 	key := assembler.Key{netFlow, portFlow}
-	ch := make(chan streamPacket)
+	ch := make(chan StreamPacket, packetBufferSize)
 	s := &stream{
 		key:      key,
 		net:      netFlow,
@@ -103,6 +108,7 @@ func (sf *streamFactory) New(ctx context.Context, netFlow, portFlow gopacket.Flo
 		created:  now(),
 		lastSeen: now(),
 	}
+
 	sf.mgr.mu.Lock()
 	sf.mgr.clientStreams[key] = s
 	sf.mgr.streamMap[key.String()] = key
@@ -111,11 +117,12 @@ func (sf *streamFactory) New(ctx context.Context, netFlow, portFlow gopacket.Flo
 	sf.wg.Go(func() error {
 		return s.handleClients(ctx, ch)
 	})
+
 	return s
 }
 
-func NewStreamFactory(sm *streamMgr, cout chan<- streamPacket, wg *errgroup.Group) *streamFactory {
-	oc := make(map[string]uint16)
+func NewStreamFactory(sm *streamMgr, cout chan<- StreamPacket, wg *errgroup.Group) *streamFactory {
+	oc := make(map[string]decoder.OpCode)
 	for k := range ocList {
 		oc[k] = sm.decoder.GetOpByName(k)
 	}
@@ -149,7 +156,7 @@ func (s *stream) Proto() *pb.Stream {
 	}
 }
 
-func (s *stream) Send(ctx context.Context, l gopacket.Layer, seq uint16) error {
+func (s *stream) Process(ctx context.Context, l gopacket.Layer, seq uint16) error {
 	p, ok := l.(*eqOldPacket.EQApplication)
 	if !ok {
 		return fmt.Errorf("improper packet type %t", l)
@@ -159,20 +166,21 @@ func (s *stream) Send(ctx context.Context, l gopacket.Layer, seq uint16) error {
 }
 
 func (s *stream) Close() {
-	close(s.ch)
+	s.once.Do(func() { close(s.ch) }) // Lazy fix because I'm tired.
 }
 
 func (s *stream) Accept(p gopacket.Layer, ci gopacket.CaptureInfo, dir assembler.FlowDirection, nSeq assembler.Sequence, start *bool, ac assembler.AssemblerContext) bool {
 	return true
 }
 
-func (s *stream) FanOut(ctx context.Context, p streamPacket) error {
+func (s *stream) FanOut(ctx context.Context, p StreamPacket) error {
 	select {
 	case <-ctx.Done():
 	case s.ch <- p:
 	default:
 		slog.Error("failed to send packet", "packet", p)
 	}
+
 	return nil
 }
 
@@ -181,22 +189,30 @@ func (s *stream) HandleAppPacket(ctx context.Context, p *eqOldPacket.EQApplicati
 
 	select {
 	case <-ctx.Done():
-	case s.sf.cout <- streamPacket{
+	case s.sf.cout <- StreamPacket{
 		seq:    uint64(seq),
 		stream: s,
 		packet: p,
+		opCode: decoder.OpCode(p.OpCode),
 	}:
 	default:
-		slog.Error("failed to send packet to fanout")
+		slog.Error("failed to send packet to processing")
 	}
 
 	return nil
 }
 
+func (s *stream) String() string {
+	return s.Proto().String()
+}
+
 func (s *stream) Identify(p *eqOldPacket.EQApplication) {
-	switch p.OpCode {
+	switch decoder.OpCode(p.OpCode) {
 	case s.sf.oc["OP_LoginPC"]:
 		s.dir = assembler.DirClientToServer
+		s.sType = ST_LOGIN
+	case s.sf.oc["OP_SessionReady"]:
+		s.dir = assembler.DirServerToClient
 		s.sType = ST_LOGIN
 	case s.sf.oc["OP_LoginAccepted"]:
 		s.dir = assembler.DirServerToClient
@@ -232,7 +248,6 @@ func (s *stream) Identify(p *eqOldPacket.EQApplication) {
 			slog.Debug("identified stream by mate", "stream", s.key.String())
 		}
 		s.sf.mgr.mu.RUnlock()
-
 	}
 }
 
@@ -240,7 +255,7 @@ func (s *stream) AttachToStream(ctx context.Context) (*streamClient, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ch := make(chan streamPacket, clientBuffer)
+	ch := make(chan StreamPacket, clientBuffer)
 	cinfo, ok := peer.FromContext(ctx)
 
 	var clientTag string
@@ -264,13 +279,13 @@ func (s *stream) AttachToStream(ctx context.Context) (*streamClient, error) {
 
 type streamClient struct {
 	id     uuid.UUID
-	handle chan streamPacket
+	handle chan StreamPacket
 	info   string
 	parent *stream
 }
 
 // Send relays the packet to the attached client session.
-func (c *streamClient) Send(ctx context.Context, ap streamPacket) {
+func (c *streamClient) Send(ctx context.Context, ap StreamPacket) {
 	// TODO: convert this to a ring buffer
 	select {
 	case c.handle <- ap:
@@ -299,32 +314,40 @@ func (sc *streamClient) Close() {
 }
 
 // handleClients runs the fanout loop for client sessions.
-func (s *stream) handleClients(ctx context.Context, apcb <-chan streamPacket) error {
+func (s *stream) handleClients(ctx context.Context, apcb <-chan StreamPacket) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case ap, ok := <-apcb:
 			if !ok {
-				s.mu.RLock()
-				for _, sc := range s.clients {
-					if sc.handle == nil {
-						continue
-					}
-
-					close(sc.handle)
-					sc.handle = nil
-				}
-				s.mu.RUnlock()
-
-				return nil // chan closure
+				return s.handleClientClose()
 			}
 
-			s.mu.RLock()
-			for _, c := range s.clients {
-				c.Send(ctx, ap)
-			}
-			s.mu.RUnlock()
+			s.handleClientSend(ctx, ap)
 		}
 	}
+}
+
+func (s *stream) handleClientSend(ctx context.Context, ap StreamPacket) {
+	s.mu.RLock()
+	for _, c := range s.clients {
+		c.Send(ctx, ap)
+	}
+	s.mu.RUnlock()
+}
+
+func (s *stream) handleClientClose() error {
+	s.mu.RLock()
+	for _, sc := range s.clients {
+		if sc.handle == nil {
+			continue
+		}
+
+		close(sc.handle)
+		sc.handle = nil
+	}
+	s.mu.RUnlock()
+
+	return nil // chan closure
 }

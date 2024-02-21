@@ -27,7 +27,7 @@ type (
 	}
 	Stream interface {
 		Accept(p gopacket.Layer, ci gopacket.CaptureInfo, dir FlowDirection, nextSeq Sequence, start *bool, ac AssemblerContext) bool
-		Send(ctx context.Context, p gopacket.Layer, seq uint16) error
+		Process(ctx context.Context, p gopacket.Layer, seq uint16) error
 		Clean()
 	}
 )

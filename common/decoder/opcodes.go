@@ -2,6 +2,7 @@ package decoder
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -9,13 +10,15 @@ import (
 	"sync"
 )
 
+type OpCode uint16
+
 type decoder struct {
 	mu sync.RWMutex
-	om map[uint16]string
-	mo map[string]uint16
+	om map[OpCode]string
+	mo map[string]OpCode
 }
 
-func (d *decoder) GetOp(op uint16) string {
+func (d *decoder) GetOp(op OpCode) string {
 	d.mu.RLock()
 	s, ok := d.om[op]
 	d.mu.RUnlock()
@@ -25,7 +28,7 @@ func (d *decoder) GetOp(op uint16) string {
 	return s
 }
 
-func (d *decoder) GetOpByName(op string) uint16 {
+func (d *decoder) GetOpByName(op string) OpCode {
 	d.mu.RLock()
 	s, ok := d.mo[op]
 	d.mu.RUnlock()
@@ -38,8 +41,8 @@ func (d *decoder) GetOpByName(op string) uint16 {
 // NewDecoder returns an opcode to name decoder, possibly other functions in the future like deserialization.
 func NewDecoder() *decoder {
 	return &decoder{
-		om: make(map[uint16]string),
-		mo: make(map[string]uint16),
+		om: make(map[OpCode]string),
+		mo: make(map[string]OpCode),
 	}
 }
 
@@ -53,7 +56,7 @@ func (d *decoder) LoadMap(file string) error {
 		return err
 	}
 	defer r.Close()
-	re := regexp.MustCompile(`^([a-zA-Z_]+)=([a-fA-F0-9x]+)`)
+	re := regexp.MustCompile(`^([a-zA-Z_0-9]+)=([a-fA-F0-9x]+)`)
 	s := bufio.NewScanner(r)
 	for s.Scan() {
 		sl := re.FindStringSubmatch(s.Text())
@@ -70,8 +73,12 @@ func (d *decoder) LoadMap(file string) error {
 	return s.Err()
 }
 
-func hextouint(s string) (uint16, error) {
+func hextouint(s string) (OpCode, error) {
 	clean := strings.Replace(s, "0x", "", -1)
 	opCode, err := strconv.ParseUint(clean, 16, 16)
-	return uint16(opCode), err
+	return OpCode(opCode), err
+}
+
+func (o *OpCode) String() string {
+	return fmt.Sprintf("%#4x", uint16(*o))
 }

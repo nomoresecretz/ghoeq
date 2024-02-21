@@ -16,11 +16,11 @@ func New[T any](max int) *RingBuffer[T] {
 
 // RingBuffer is a concurrency-safe ring buffer.
 type RingBuffer[T any] struct {
-	mu  sync.RWMutex
-	wPos int
+	mu    sync.RWMutex
+	wPos  int
 	cycle int
-	buf []T
-	max int
+	buf   []T
+	max   int
 }
 
 // Add appends a new item to the RingBuffer, possibly overwriting the oldest
@@ -41,18 +41,18 @@ func (rb *RingBuffer[T]) Add(t T) {
 
 // GetAll returns a copy of all the entries in the ring buffer in the order they
 // were added.
-func (rb *RingBuffer[T]) GetAll(s, c int) ([]T, int, int) {
+func (rb *RingBuffer[T]) GetAll() []T {
 	if rb == nil {
-		return nil, 0, 0
+		return nil
 	}
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
 	out := make([]T, len(rb.buf))
 	for i := 0; i < len(rb.buf); i++ {
-		x := (rb.wPos + i + s) % rb.max
+		x := (rb.wPos + i) % rb.max
 		out[i] = rb.buf[x]
 	}
-	return out, rb.wPos, rb.cycle
+	return out
 }
 
 // Len returns the number of elements in the ring buffer. Note that this value

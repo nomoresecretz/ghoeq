@@ -6,6 +6,7 @@ import (
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/pcap"
+	"github.com/nomoresecretz/ghoeq/common/decoder"
 	"github.com/nomoresecretz/ghoeq/common/eqOldPacket"
 	"github.com/nomoresecretz/ghoeq/server/assembler"
 	"golang.org/x/sync/errgroup"
@@ -18,26 +19,28 @@ type streamMgr struct {
 
 	mu            sync.RWMutex
 	clientStreams map[assembler.Key]*stream
-	streamMap map[string]assembler.Key
-	clientWatch *gameClientWatch
+	streamMap     map[string]assembler.Key
+	clientWatch   *gameClientWatch
+	session       *session
 }
 
 type opDecoder interface {
-	GetOp(uint16) string
-	GetOpByName(string) uint16
+	GetOp(decoder.OpCode) string
+	GetOpByName(string) decoder.OpCode
 }
 
 func NewStreamMgr(d opDecoder, cw *gameClientWatch) *streamMgr {
+	cw.decoder = d // this is a terrible hack.
 	return &streamMgr{
 		clientStreams: make(map[assembler.Key]*stream),
-		streamMap: make(map[string]assembler.Key),
+		streamMap:     make(map[string]assembler.Key),
 		decoder:       d,
-		clientWatch: cw,
+		clientWatch:   cw,
 	}
 }
 
 // NewCapture sets up a new capture session on an interface / source.
-func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<- streamPacket, wg *errgroup.Group) error {
+func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<- StreamPacket, wg *errgroup.Group) error {
 	if err := h.SetBPFFilter("port 9000 or port 6000 or portrange 7000-7400"); err != nil {
 		return (err)
 	}
@@ -64,40 +67,54 @@ func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<-
 				break
 			}
 
-			sm.packets++
-
-			// Skip non interesting packets
-			o := p.Layer(eqOldPacket.OldEQOuterType)
-			if o == nil {
-				continue
-			}
-
-			sm.eqpackets++
-			// Reassemble fragment packets
-			op, _ := o.(*eqOldPacket.OldEQOuter)
-
-			op, stream, err := streamAsm.Assemble(ctx, p.NetworkLayer().NetworkFlow(), p.TransportLayer().TransportFlow(), op)
-			if err != nil {
-				return err
-			}
-
-			if op == nil {
-				continue
-			}
-
-			var payload []byte
-			copy(payload, op.Payload) // Checking if this fixes a repeat bug.
-			p = gopacket.NewPacket(payload, eqOldPacket.EQApplicationType, gopacket.Default)
-
-			eqold := p.Layer(eqOldPacket.EQApplicationType)
-			if eqold == nil {
-				continue
-			}
-
-			if err := stream.Send(ctx, eqold, op.Seq); err != nil {
+			if err := sm.handlePacket(ctx, p, streamAsm); err != nil {
 				return err
 			}
 		}
+	}
+
+	return nil
+}
+
+type asm interface {
+	Assemble(ctx context.Context, net, port gopacket.Flow, op *eqOldPacket.OldEQOuter) (*eqOldPacket.OldEQOuter, assembler.Stream, error)
+}
+
+func (sm *streamMgr) handlePacket(ctx context.Context, p gopacket.Packet, streamAsm asm) error {
+	sm.packets++
+
+	// Skip non interesting packets
+	o := p.Layer(eqOldPacket.OldEQOuterType)
+	if o == nil {
+		return nil
+	}
+
+	sm.eqpackets++
+	// Reassemble fragment packets
+	op, _ := o.(*eqOldPacket.OldEQOuter)
+
+	op, stream, err := streamAsm.Assemble(ctx, p.NetworkLayer().NetworkFlow(), p.TransportLayer().TransportFlow(), op)
+	if err != nil {
+		return err
+	}
+
+	if op == nil {
+		return nil
+	}
+
+	if len(op.Payload) == 0 {
+		return nil
+	}
+
+	p = gopacket.NewPacket(op.Payload, eqOldPacket.EQApplicationType, gopacket.Default)
+
+	eqold := p.Layer(eqOldPacket.EQApplicationType)
+	if eqold == nil {
+		return nil
+	}
+
+	if err := stream.Process(ctx, eqold, op.Seq); err != nil {
+		return err
 	}
 
 	return nil

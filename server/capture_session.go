@@ -14,7 +14,7 @@ import (
 
 const (
 	clientBuffer = 50 // packets
-	fanBuffer    = 10
+	procBuffer   = 50
 )
 
 type sessionHandle interface {
@@ -55,9 +55,10 @@ func (s *session) Run(ctx context.Context, src string) error {
 	}
 
 	// TODO: replace this with lockless ring buffer.
-	apc := make(chan streamPacket, fanBuffer)
+	apc := make(chan StreamPacket, procBuffer)
 	sm := NewStreamMgr(d, s.mgr.clientWatch)
 	s.sm = sm
+	sm.session = s
 
 	wg, wctx := errgroup.WithContext(ctx)
 	/*  TODO: prune unneeded capture sessions.
@@ -127,43 +128,53 @@ func (s *session) timeoutWatch(ctx context.Context) {
 */
 
 // processPackets is just a placeholder for the grunt work until the real structure exists.
-func (s *session) processPackets(ctx context.Context, cin <-chan streamPacket) error {
+func (s *session) processPackets(ctx context.Context, cin <-chan StreamPacket) error {
 	c := NewCrypter()
 
 	for p := range cin {
-		if err := ctx.Err(); err != nil {
+		if err := s.processPacket(ctx, p, c); err != nil {
 			return err
 		}
+	}
 
-		ap := p.packet
+	return nil
+}
 
-		d := s.sm.decoder
+func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
-		opCode := d.GetOp(ap.OpCode)
-		if opCode == "" {
-			opCode = fmt.Sprintf("%#4x", ap.OpCode)
+	ap := p.packet
+
+	d := s.sm.decoder
+
+	opCode := d.GetOp(decoder.OpCode(ap.OpCode))
+	if opCode == "" {
+		opCode = fmt.Sprintf("%#4x", ap.OpCode)
+	}
+
+	if c.IsCrypted(opCode) {
+		res, err := c.Decrypt(opCode, ap.Payload)
+		if err != nil {
+			slog.Error(fmt.Sprintf("error decrpyting %s", err))
 		}
 
-		if c.IsCrypted(opCode) {
-			res, err := c.Decrypt(opCode, ap.Payload)
-			if err != nil {
-				slog.Error(fmt.Sprintf("error decrpyting %s", err))
-			}
+		ap.Payload = res
+	}
 
-			ap.Payload = res
-		}
+	if p.stream.gameClient != nil {
+		p.stream.gameClient.Run(p)
+	} else {
+		s.sm.clientWatch.Run(p)
+	}
 
-		if p.stream.sType == ST_UNKNOWN {
-			slog.Error("unknown packet stream", "packet", p)
-		}
-		if p.stream.gameClient != nil {
-			p.stream.gameClient.Run(p)
-		} else {
-			s.sm.clientWatch.Run(p)
-		}
-		if err := p.stream.FanOut(ctx, p); err != nil {
-			return err
-		}
+	if p.stream.sType == ST_UNKNOWN {
+		slog.Error("unknown packet stream", "stream", p.stream, "opCode", p.packet.OpCode)
+	}
+
+	if err := p.stream.FanOut(ctx, p); err != nil {
+		return err
 	}
 
 	return nil

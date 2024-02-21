@@ -33,8 +33,8 @@ func main() {
 }
 
 type dec interface {
-	GetOp(uint16) string
-	GetOpByName(string) uint16
+	GetOp(decoder.OpCode) string
+	GetOpByName(string) decoder.OpCode
 	LoadMap(string) error
 }
 
@@ -75,7 +75,7 @@ func doStuff(ctx context.Context) error {
 
 	eg.Go(func() error {
 		var client *pb.Client
-		cs, err := c.AttachClient(ctx, &pb.AttachClientRequest{})
+		cs, err := c.AttachClient(gctx, &pb.AttachClientRequest{})
 		if err != nil {
 			return err
 		}
@@ -107,6 +107,7 @@ func followStream(ctx context.Context, stream *pb.Stream, c pb.BackendServerClie
 	s, err := c.AttachStreamRaw(ctx, &pb.AttachStreamRawRequest{
 		Id:    stream.GetId(),
 		Nonce: "0",
+		SessionId: stream.GetSession().GetId(),
 	})
 	if err != nil {
 		return err
@@ -129,7 +130,7 @@ func followStream(ctx context.Context, stream *pb.Stream, c pb.BackendServerClie
 			return err
 		}
 		opRaw := p.GetOpCode()
-		op := d.GetOp(uint16(opRaw))
+		op := d.GetOp(decoder.OpCode(opRaw))
 		if op == "" {
 			op = fmt.Sprintf("%#4x", opRaw)
 		}
@@ -174,7 +175,9 @@ func getSessionID(ctx context.Context, c pb.BackendServerClient) (string, error)
 	case l > 1:
 		return "", fmt.Errorf("too many active sessions to pick one. select manually")
 	}
-	return s.GetSessions()[0].GetId(), nil
+	session := s.GetSessions()[0]
+	slog.Info("identified capture session", "session", session)
+	return session.GetId(), nil
 }
 
 func getSource(ctx context.Context, c pb.BackendServerClient) (string, error) {

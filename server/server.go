@@ -111,7 +111,7 @@ func (s *ghoeqServer) ListStreams(ctx context.Context, r *pb.ListStreamRequest) 
 
 	sess.mu.RLock()
 	streamId := r.GetStreamId()
-	
+
 	var streams []*pb.Stream
 	for _, str := range sess.sm.clientStreams {
 		if streamId != "" && streamId != str.key.String() {
@@ -147,19 +147,24 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 	if r.GetClientId() == "" {
 		cupd = &pb.Client{
 			Id: string(cli.id.String()),
-			//Address: cli., // TODO: add client address logic.
+			// Address: cli., // TODO: add client address logic.
 		}
 	}
 	r1 := &pb.ClientUpdate{
 		Client: cupd,
 	}
-	
+	slog.Debug("new client identified, notifying watchers")
+
 	seen := make(map[string]struct{})
 
 	var strz []*pb.Stream
 	cli.mu.RLock()
 	for _, v := range cli.streams {
 		streamProto := v.Proto()
+		session := v.sf.mgr.session
+		streamProto.Session = &pb.Session{
+			Id: session.id.String(),
+		}
 		strz = append(strz, streamProto)
 		seen[streamProto.Id] = struct{}{}
 	}
@@ -182,12 +187,19 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 		case <-p:
 			cli.mu.RLock()
 			p = cli.ping
+			cli.mu.RUnlock()
 
 			var strz []*pb.Stream
+
 			for _, v := range cli.streams {
 				streamProto := v.Proto()
 				if _, ok := seen[streamProto.Id]; ok {
 					continue
+				}
+				slog.Debug("notifying watcher of new gameClient stream")
+				session := v.sf.mgr.session
+				streamProto.Session = &pb.Session{
+					Id: session.id.String(),
 				}
 				strz = append(strz, streamProto)
 				seen[streamProto.Id] = struct{}{}
@@ -226,13 +238,32 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRawRequest, stream pb.Ba
 	if !ok {
 		return fmt.Errorf("missing stream: %s", k.String())
 	}
+	ses.sm.mu.RUnlock()
 
 	cStream, err := str.AttachToStream(ctx)
 	if err != nil {
 		return err
 	}
 
+	slog.Debug("client added a stream watch")
+
 	defer cStream.Close()
+
+	// send the backlog of packets seen before they attached.
+	op := str.rb.GetAll()
+	slog.Debug("sending packet backlog")
+	for _, p := range op {
+		outP := &pb.APPacket{
+			//			Seq:    p.seq,
+			OpCode: uint32(p.OpCode),
+			Data:   p.Payload,
+		}
+		if err := stream.Send(outP); err != nil {
+			return err
+		}
+	}
+
+	slog.Debug("looping new packets")
 
 	// loop sending the packets to the client
 	for {
