@@ -257,7 +257,7 @@ func (s *ghoeqServer) AttachSessionRaw(r *pb.AttachSessionRequest, stream pb.Bac
 
 	defer cStream.Close()
 
-	return s.sendLoop(ctx, cStream.handle, stream, make(map[uint64]struct{}))
+	return s.sendLoop(ctx, cStream.handle, stream, nil)
 }
 
 type streamSender interface {
@@ -277,8 +277,12 @@ func (s *ghoeqServer) sendLoop(ctx context.Context, handle <-chan StreamPacket, 
 			}
 
 			// Avoid double send
-			if _, ok := seen[p.seq]; ok {
-				continue
+			if seen != nil {
+				if _, ok := seen[p.seq]; ok {
+					continue
+				}
+				seen[p.seq] = struct{}{}
+				delete(seen, p.seq-100)
 			}
 
 			op := p.Proto()
