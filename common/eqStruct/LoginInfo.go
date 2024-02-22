@@ -12,14 +12,14 @@ type LoginInfo struct {
 func (p *LoginInfo) EQType() EQType { return EQT_LoginInfo }
 func (p *LoginInfo) bp() *int       { return &p.bPointer }
 
-func (p *LoginInfo) Deserialize(b []byte) error {
+func (p *LoginInfo) Unmarshal(b []byte) error {
 	p.bPointer = 0
 
-	if err := EQReadStringNullTerm(b, p, &p.Account); err != nil {
+	if err := EQRead(b, p, &p.Account, 0); err != nil {
 		return err
 	}
-	
-	if err := EQReadStringNullTerm(b, p, &p.Password); err != nil {
+
+	if err := EQRead(b, p, &p.Password, 0); err != nil {
 		return err
 	}
 

@@ -244,7 +244,7 @@ func (c *gameClient) Run(p StreamPacket) error {
 	case op == "OP_PlayEverquestRequest":
 		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
 		ply := &eqStruct.PlayRequest{}
-		if err := ply.Deserialize(p.packet.Payload); err != nil {
+		if err := ply.Unmarshal(p.packet.Payload); err != nil {
 			return err
 		}
 
@@ -258,7 +258,7 @@ func (c *gameClient) Run(p StreamPacket) error {
 	case op == "OP_LogServer" && p.stream.dir == assembler.DirServerToClient:
 		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
 		ls := eqStruct.LogServer{}
-		if err := ls.Deserialize(p.packet.Payload); err != nil {
+		if err := ls.Unmarshal(p.packet.Payload); err != nil {
 			return err
 		}
 
@@ -269,7 +269,7 @@ func (c *gameClient) Run(p StreamPacket) error {
 	case op == "OP_EnterWorld":
 		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
 		ew := eqStruct.EnterWorld{}
-		if err := ew.Deserialize(p.packet.Payload); err != nil {
+		if err := ew.Unmarshal(p.packet.Payload); err != nil {
 			return err
 		}
 
@@ -291,7 +291,7 @@ func (c *gameClient) Run(p StreamPacket) error {
 	case op == "OP_ZoneServerInfo":
 		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
 		zi := &eqStruct.ZoneServerInfo{}
-		if err := zi.Deserialize(p.packet.Payload); err != nil {
+		if err := zi.Unmarshal(p.packet.Payload); err != nil {
 			return err
 		}
 
@@ -306,7 +306,7 @@ func (c *gameClient) Run(p StreamPacket) error {
 	case op == "OP_ZoneEntry" && p.stream.dir == assembler.DirServerToClient:
 		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
 		zs := eqStruct.ServerZoneEntry{}
-		if err := zs.Deserialize(p.packet.Payload); err != nil {
+		if err := zs.Unmarshal(p.packet.Payload); err != nil {
 			return err
 		}
 
@@ -321,7 +321,7 @@ func (c *gameClient) Run(p StreamPacket) error {
 	case op == "OP_SendLoginInfo":
 		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
 		li := eqStruct.LoginInfo{}
-		if err := li.Deserialize(p.packet.Payload); err != nil {
+		if err := li.Unmarshal(p.packet.Payload); err != nil {
 			return err
 		}
 
@@ -337,7 +337,7 @@ func (c *gameClient) Run(p StreamPacket) error {
 	case op == "OP_LoginAccepted":
 		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
 		li := eqStruct.LoginAccepted{}
-		if err := li.Deserialize(p.packet.Payload); err != nil {
+		if err := li.Unmarshal(p.packet.Payload); err != nil {
 			return err
 		}
 

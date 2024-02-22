@@ -1,7 +1,7 @@
 package eqStruct
 
 type ServerZoneEntry struct {
-	Checksum  [4]byte // 000
+	Checksum  []byte  // 000 Len4
 	Type      uint8   // 004
 	Name      string  // 005 MAX64
 	Unknown70 []byte  // 70
@@ -28,7 +28,7 @@ type ServerZoneEntry struct {
 func (p *ServerZoneEntry) EQType() EQType { return EQT_ServerZoneEntry }
 func (p *ServerZoneEntry) bp() *int       { return &p.bPointer }
 
-func (p *ServerZoneEntry) Deserialize(b []byte) error {
+func (p *ServerZoneEntry) Unmarshal(b []byte) error {
 	p.bPointer = 0
 
 	if err := EQRead(b, p, &p.Checksum, 4); err != nil {
@@ -52,18 +52,20 @@ func (p *ServerZoneEntry) Deserialize(b []byte) error {
 		return err
 	}
 
-	if err := EQRead(b, p, &p.PosX, 2); err != nil {
-		return err
-	}
-	if err := EQRead(b, p, &p.PosY, 2); err != nil {
-		return err
-	}
-	if err := EQRead(b, p, &p.PosZ, 2); err != nil {
-		return err
-	}
-	if err := EQRead(b, p, &p.Heading, 2); err != nil {
-		return err
-	}
+	/*
+		if err := EQRead(b, p, &p.PosX, 2); err != nil {
+			return err
+		}
+		if err := EQRead(b, p, &p.PosY, 2); err != nil {
+			return err
+		}
+		if err := EQRead(b, p, &p.PosZ, 2); err != nil {
+			return err
+		}
+		if err := EQRead(b, p, &p.Heading, 2); err != nil {
+			return err
+		}
+	*/
 
 	p.bPointer = 156
 	if err := EQRead(b, p, &p.HPMax, 2); err != nil {

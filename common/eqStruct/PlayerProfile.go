@@ -89,11 +89,11 @@ type PlayerProfile struct {
 func (p *PlayerProfile) EQType() EQType { return EQT_PlayerProfile }
 func (p *PlayerProfile) bp() *int       { return &p.bPointer }
 
-func (p *PlayerProfile) Deserialize(b []byte) (*PlayerProfile, error) {
+func (p *PlayerProfile) Unmarshal(b []byte) error {
 	p.bPointer = 0
 
 	if err := EQRead(b, p, &p.Gender, 0); err != nil {
-		return nil, err
+		return err
 	}
-	return p, nil
+	return nil
 }

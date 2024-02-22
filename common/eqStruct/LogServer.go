@@ -11,7 +11,7 @@ type LogServer struct {
 func (p *LogServer) EQType() EQType { return EQT_LogServer }
 func (p *LogServer) bp() *int       { return &p.bPointer }
 
-func (p *LogServer) Deserialize(b []byte) error {
+func (p *LogServer) Unmarshal(b []byte) error {
 	p.bPointer = 32
 	if err := EQRead(b, p, &p.ShortName, 32); err != nil {
 		return err

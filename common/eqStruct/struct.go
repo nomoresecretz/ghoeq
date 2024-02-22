@@ -28,14 +28,15 @@ const (
 type EQStruct interface {
 	EQType() EQType
 	bp() *int
+	Unmarshal(b []byte) error // This is only temporary until the VM is implemented.
 }
 
 type EQTypes interface {
-	constraints.Integer
+	uint8 | uint16 | uint32 | string | []byte
 }
 
-func EQRead(b []byte, s EQStruct, field any, size int) error {
-	switch t := field.(type) {
+func EQRead[T EQTypes](b []byte, s EQStruct, field *T, size int) error {
+	switch t := any(field).(type) {
 	case *uint32:
 		return EQReadUint32(b, s, t)
 	case *uint16:
@@ -45,6 +46,9 @@ func EQRead(b []byte, s EQStruct, field any, size int) error {
 	case *[]byte:
 		return EQReadBytes(b, s, t, size)
 	case *string:
+		if size == 0 {
+			return EQReadStringNullTerm(b, s, t)
+		}
 		return EQReadString(b, s, t, size)
 	default:
 		return fmt.Errorf("unsupported type %t", t)
@@ -55,7 +59,7 @@ func EQReadUint32(b []byte, s EQStruct, field *uint32) error {
 	p := s.bp()
 	c := b[*p:]
 	*field = binary.BigEndian.Uint32(c)
-	*p += 2
+	*p += 4
 
 	return nil
 }
@@ -73,7 +77,7 @@ func EQReadUint8(b []byte, s EQStruct, field *uint8) error {
 	p := s.bp()
 	c := b[*p]
 	*field = uint8(c)
-	*p += 1
+	*p++
 
 	return nil
 }

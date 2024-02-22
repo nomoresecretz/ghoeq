@@ -9,9 +9,9 @@ type LoginAccepted struct {
 func (p *LoginAccepted) EQType() EQType { return EQT_LoginAccepted }
 func (p *LoginAccepted) bp() *int       { return &p.bPointer }
 
-func (p *LoginAccepted) Deserialize(b []byte) error {
+func (p *LoginAccepted) Unmarshal(b []byte) error {
 	p.bPointer = 0
-	if err := EQReadString(b, p, &p.Account, 10); err != nil {
+	if err := EQRead(b, p, &p.Account, 10); err != nil {
 		return err
 	}
 
