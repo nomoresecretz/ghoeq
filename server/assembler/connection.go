@@ -57,6 +57,7 @@ func (dir FlowDirection) Reverse() FlowDirection {
 	case DirServerToClient:
 		return DirClientToServer
 	}
+	
 	return dir
 }
 
