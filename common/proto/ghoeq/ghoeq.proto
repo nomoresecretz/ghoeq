@@ -9,6 +9,7 @@ service BackendServer {
     rpc ListSources (ListRequest) returns (ListSourcesResponse) {}
     rpc ListSession (ListRequest) returns (ListSessionResponse) {}
     rpc ListStreams (ListStreamRequest) returns (ListStreamsResponse) {}
+    rpc ListClients (ListClientRequest) returns (ListClientsResponse) {}
     rpc ModifySession (ModifySessionRequest) returns (SessionResponse) {}
     rpc AttachSessionRaw(AttachSessionRequest) returns (stream APPacket) {}
     rpc AttachClient(AttachClientRequest) returns (stream ClientUpdate) {}
@@ -30,27 +31,34 @@ message ClientUpdate {
 }
 
 message ListStreamRequest {
-    string nonce = 1;
-    string session_id = 2;
-    string stream_id = 3;
+    string session_id = 1;
+    string stream_id = 2;
+}
+
+message ListClientRequest {
+    string id = 1;
+    string server_name = 2;
+    string character_name = 3;
 }
 
 message ListRequest {
-    string nonce = 1;
-    string id = 2;
+    string id = 1;
 }
 
 message ListStreamsResponse {
     repeated Stream streams = 1;
 }
 
+message ListClientsResponse {
+    repeated GameStream clients = 1;
+}
+
 message SessionResponse {}
 
 message AttachStreamRequest {
     string id = 1; // Start pulling a specific stream, or 0 for first avaliable if one or none.
-    string nonce = 2;
-    uint64 seq = 3; // Used for resume from previous sequence number. Not implmented yet.
-    string session_id = 4;
+    uint64 seq = 2; // Used for resume from previous sequence number. Not implmented yet.
+    string session_id = 3;
 }
 
 message ListSourcesResponse {
@@ -84,15 +92,16 @@ message Source {
 
 message GameStream {
     uint32 id = 1;
-    reserved 2; //deprecated
-    //google.protobuf.DateTime first_seen = 3;
-    Client client = 4;
-    repeated Stream sessions = 5;
+    //google.protobuf.DateTime first_seen = 2;
+    Client client = 3;
+    repeated Stream sessions = 4;
 }
 
 message Client {
     string id = 1;
     string address = 2;
+    string server_name = 3;
+    string character_name = 4;
 }
 
 message Stream {

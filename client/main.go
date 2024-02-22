@@ -147,7 +147,7 @@ func followStream(ctx context.Context, stream *pb.Stream, c pb.BackendServerClie
 		// TODO: Add api to push/pull opcode definitions from server.
 		//		si := p.GetStreamInfo()
 		fmt.Printf("StreamInfo %s %s %s:%s->%s:%s\n", sType, sDir, sAddr, sPort, sPeerAddr, sPeerPort)
-		fmt.Printf("Packet %#4X : OpCode %s %s\n", 0x0, op, spew.Sdump(p.GetData()))
+		fmt.Printf("Packet %0#4x : OpCode %s %s\n", p.GetSeq(), op, spew.Sdump(p.GetData()))
 	}
 	return nil
 }
@@ -248,17 +248,25 @@ func followSource(ctx context.Context, c pb.BackendServerClient, d dec) error {
 			op = fmt.Sprintf("%#4x", opRaw)
 		}
 
-		stream, err := getStreamInfo(ctx, p.StreamId)
-		if err != nil {
-			return err
+		streamId := p.GetStreamId()
+		if streamId != "" {
+			stream, err := getStreamInfo(ctx, p.StreamId)
+			if err != nil {
+				return err
+			}
+
+			if err != nil {
+				return fmt.Errorf("failed to get stream info: %w", err)
+			}
+
+			fmt.Printf("StreamInfo %s %s %s:%s->%s:%s\n", stream.GetType(), stream.GetDirection().String(), stream.GetAddress(), stream.GetPort(), stream.GetPeerAddress(), stream.GetPeerPort())
 		}
 
-		if err != nil {
-			return fmt.Errorf("failed to get stream info: %w", err)
+		if op == "OP_PlayerProfile" {
+			fmt.Printf("Packet %#04x : OpCode %s %s\n", p.GetSeq(), op, "snip")
+			continue
 		}
-
-		fmt.Printf("StreamInfo %s %s %s:%s->%s:%s\n", stream.GetType(), stream.GetDirection().String(), stream.GetAddress(), stream.GetPort(), stream.GetPeerAddress(), stream.GetPeerPort())
-		fmt.Printf("Packet %#4X : OpCode %s %s", 0x0, op, spew.Sdump(p.GetData()))
+		fmt.Printf("Packet %#04x : OpCode %s %s\n", p.GetSeq(), op, spew.Sdump(p.GetData()))
 	}
 
 	return nil

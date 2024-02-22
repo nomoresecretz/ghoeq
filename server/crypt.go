@@ -24,6 +24,9 @@ func NewCrypter() *crypter {
 			"OP_CharInventory":       cypher.NewNull(),
 			"OP_ShopInventoryPacket": cypher.NewNull(),
 			"OP_SpawnDoor":           cypher.NewNull(),
+			"OP_PlayerProfile":       cypher.NewProfile(),
+			"OP_ZoneSpawns":          cypher.NewSpawn(),
+			"OP_NewSpawn":            cypher.NewSpawn(),
 		},
 	}
 }

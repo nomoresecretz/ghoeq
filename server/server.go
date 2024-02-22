@@ -171,6 +171,9 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 			return ctx.Err()
 		case <-p:
 			p = cli.PingChan()
+			if p == nil {
+				return nil
+			}
 
 			var strz []*pb.Stream
 

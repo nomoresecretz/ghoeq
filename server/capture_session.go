@@ -45,9 +45,10 @@ type sessionClient struct {
 
 func NewSession(id uuid.UUID, src string, sm *sessionMgr) *session {
 	return &session{
-		id:     id,
-		source: src,
-		mgr:    sm,
+		id:      id,
+		source:  src,
+		mgr:     sm,
+		clients: make(map[uuid.UUID]*sessionClient),
 	}
 }
 
@@ -101,6 +102,7 @@ func (s *session) Run(ctx context.Context, src string) error {
 // Close closes the underlying source, causing a chain of graceful closures up the handler stack, ultimately gracefully ending the session. Non Blocking.
 func (s *session) Close() {
 	s.handle.Close()
+	close(s.clientChan)
 }
 
 /*

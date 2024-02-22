@@ -30,6 +30,7 @@ var ocList = map[string]struct{}{
 	"OP_LogServer":     {},
 	"OP_ZoneEntry":     {},
 	"OP_PlayerProfile": {},
+	"OP_DataRate":      {},
 }
 
 type streamFactory struct {
@@ -96,9 +97,10 @@ type StreamPacket struct {
 
 func (s *StreamPacket) Proto() *pb.APPacket {
 	return &pb.APPacket{
-		Seq: s.seq,
-		OpCode: uint32(s.opCode),
-		Data: s.packet.Payload,
+		Seq:      s.seq,
+		OpCode:   uint32(s.opCode),
+		Data:     s.packet.Payload,
+		StreamId: s.stream.id,
 	}
 }
 
@@ -206,6 +208,9 @@ func (s *stream) Identify(p *eqOldPacket.EQApplication) {
 	case s.sf.oc["OP_LoginPC"]:
 		s.dir = assembler.DirClientToServer
 		s.sType = ST_LOGIN
+	case s.sf.oc["OP_DataRate"]:
+		s.dir = assembler.DirClientToServer
+		s.sType = ST_ZONE
 	case s.sf.oc["OP_SessionReady"]:
 		s.dir = assembler.DirServerToClient
 		s.sType = ST_LOGIN
@@ -219,19 +224,22 @@ func (s *stream) Identify(p *eqOldPacket.EQApplication) {
 		s.dir = assembler.DirServerToClient
 		s.sType = ST_WORLD
 	case s.sf.oc["OP_ZoneEntry"]:
-		s.dir = assembler.DirClientToServer
 		s.sType = ST_ZONE
 	case s.sf.oc["OP_PlayerProfile"]:
 		s.dir = assembler.DirServerToClient
 		s.sType = ST_ZONE
 	}
 
+	if s.sType == ST_ZONE {
+		time.Sleep(time.Second) // Lets hold a moment and see if the predict comes in.
+	}
+
 	if s.sType != ST_UNKNOWN {
-		slog.Debug("identified stream type", "stream", s.key.String(), "type", s.sType.String(), "direction", s.dir.String())
+		slog.Info("identified stream type", "stream", s.key.String(), "type", s.sType.String(), "direction", s.dir.String(), "packet", p.OpCode)
 	}
 
 	// still unknown, lets check for our mate.
-	if s.sType == ST_UNKNOWN {
+	if s.sType == ST_UNKNOWN || s.dir == assembler.DirUnknown {
 		rev := s.key.Reverse()
 		s.sf.mgr.mu.RLock()
 
@@ -258,7 +266,7 @@ func (s *stream) AttachToStream(ctx context.Context) (*streamClient, error) {
 		clientTag = cinfo.Addr.String()
 	}
 
-	slog.Info("capture stream adding client", "stream", s.key.String(), "client", clientTag)
+	slog.Info("capture stream adding client", "type", s.sType.String(), "stream", s.key.String(), "client", clientTag)
 
 	id := uuid.New()
 	c := &streamClient{
