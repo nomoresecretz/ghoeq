@@ -20,6 +20,7 @@ var (
 	serverAddr = flag.String("server", "127.0.0.1:6420", "Server target info")
 	src        = flag.String("source", "", "server capture source")
 	opFile     = flag.String("opFile", "", "opcode mapping data file")
+	raw        = flag.Bool("raw", false, "raw capture mode")
 )
 
 // Simple rpc test client
@@ -53,6 +54,15 @@ func doStuff(ctx context.Context) error {
 	}
 	c := pb.NewBackendServerClient(conn)
 
+	switch {
+	case *raw:
+		return followSource(ctx, c, d)
+	default:
+		return followClient(ctx, c, d)
+	}
+}
+
+func followClient(ctx context.Context, c pb.BackendServerClient, d dec) error {
 	eg, gctx := errgroup.WithContext(ctx)
 
 	newStream := func(s *pb.Stream) {
@@ -68,7 +78,7 @@ func doStuff(ctx context.Context) error {
 	}
 
 	// confirm we have a running capture.
-	_, err = getSessionID(ctx, c)
+	_, err := getSessionID(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -104,9 +114,9 @@ func doStuff(ctx context.Context) error {
 
 func followStream(ctx context.Context, stream *pb.Stream, c pb.BackendServerClient, d dec) error {
 	var err error
-	s, err := c.AttachStreamRaw(ctx, &pb.AttachStreamRawRequest{
-		Id:    stream.GetId(),
-		Nonce: "0",
+	s, err := c.AttachStreamRaw(ctx, &pb.AttachStreamRequest{
+		Id:        stream.GetId(),
+		Nonce:     "0",
 		SessionId: stream.GetSession().GetId(),
 	})
 	if err != nil {
@@ -193,4 +203,78 @@ func getSource(ctx context.Context, c pb.BackendServerClient) (string, error) {
 		return "", fmt.Errorf("too many sources, pick one manually")
 	}
 	return sources[0].GetId(), nil
+}
+
+func followSource(ctx context.Context, c pb.BackendServerClient, d dec) error {
+	// confirm we have a running capture.
+	sessionId, err := getSessionID(ctx, c)
+	if err != nil {
+		return err
+	}
+
+	streamInfo := make(map[string]*pb.Stream)
+	getStreamInfo := func(ctx context.Context, streamId string) (*pb.Stream, error) {
+		if s, ok := streamInfo[streamId]; ok {
+			return s, nil
+		}
+		s, err := getStream(ctx, c, sessionId, streamId)
+		if err != nil {
+			return nil, err
+		}
+		streamInfo[streamId] = s
+		return s, nil
+	}
+
+	slog.Info("identified capture session", "session", sessionId)
+	stream, err := c.AttachSessionRaw(ctx, &pb.AttachSessionRequest{
+		SessionId: sessionId,
+	})
+	if err != nil {
+		return err
+	}
+	slog.Info("connected, beginning stream")
+	for {
+		p, err := stream.Recv()
+		if err == io.EOF {
+			slog.Info("server ended stream")
+			break
+		}
+		if err != nil {
+			return err
+		}
+		opRaw := p.GetOpCode()
+		op := d.GetOp(decoder.OpCode(opRaw))
+		if op == "" {
+			op = fmt.Sprintf("%#4x", opRaw)
+		}
+
+		stream, err := getStreamInfo(ctx, p.StreamId)
+		if err != nil {
+			return err
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to get stream info: %w", err)
+		}
+
+		fmt.Printf("StreamInfo %s %s %s:%s->%s:%s\n", stream.GetType(), stream.GetDirection().String(), stream.GetAddress(), stream.GetPort(), stream.GetPeerAddress(), stream.GetPeerPort())
+		fmt.Printf("Packet %#4X : OpCode %s %s", 0x0, op, spew.Sdump(p.GetData()))
+	}
+
+	return nil
+}
+
+func getStream(ctx context.Context, c pb.BackendServerClient, sessionId, streamId string) (*pb.Stream, error) {
+	r, err := c.ListStreams(ctx, &pb.ListStreamRequest{SessionId: sessionId, StreamId: streamId})
+	if err != nil {
+		return nil, err
+	}
+
+	streams := r.GetStreams()
+	l := len(streams)
+	if l != 1 {
+		return nil, fmt.Errorf("incorrect stream count: got %d, want 1", l)
+	}
+
+	return streams[0], nil
 }

@@ -10,6 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/nomoresecretz/ghoeq/common/decoder"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/peer"
+
+	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
 )
 
 const (
@@ -21,13 +24,23 @@ type sessionHandle interface {
 	Close()
 }
 type session struct {
-	id         uuid.UUID
-	handle     sessionHandle
+	id     uuid.UUID
+	handle sessionHandle
+
 	mu         sync.RWMutex
 	lastClient time.Time
 	source     string
 	sm         *streamMgr
 	mgr        *sessionMgr
+	clients    map[uuid.UUID]*sessionClient
+	clientChan chan<- StreamPacket
+}
+
+type sessionClient struct {
+	id     uuid.UUID
+	handle chan StreamPacket
+	info   string
+	parent *session
 }
 
 func NewSession(id uuid.UUID, src string, sm *sessionMgr) *session {
@@ -56,6 +69,8 @@ func (s *session) Run(ctx context.Context, src string) error {
 
 	// TODO: replace this with lockless ring buffer.
 	apc := make(chan StreamPacket, procBuffer)
+	apcb := make(chan StreamPacket, procBuffer)
+	s.clientChan = apcb
 	sm := NewStreamMgr(d, s.mgr.clientWatch)
 	s.sm = sm
 	sm.session = s
@@ -75,6 +90,9 @@ func (s *session) Run(ctx context.Context, src string) error {
 		defer sm.Close()
 
 		return s.processPackets(wctx, apc)
+	})
+	wg.Go(func() error {
+		return s.handleClients(wctx, apcb, sm)
 	})
 
 	return wg.Wait()
@@ -169,8 +187,8 @@ func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter)
 		s.sm.clientWatch.Run(p)
 	}
 
-	if p.stream.sType == ST_UNKNOWN {
-		slog.Error("unknown packet stream", "stream", p.stream, "opCode", p.packet.OpCode)
+	if err := s.clientSend(ctx, p); err != nil {
+		return err
 	}
 
 	if err := p.stream.FanOut(ctx, p); err != nil {
@@ -178,4 +196,107 @@ func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter)
 	}
 
 	return nil
+}
+
+// handleClients runs the fanout loop for client sessions.
+func (s *session) handleClients(ctx context.Context, apcb <-chan StreamPacket, sm *streamMgr) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case p, ok := <-apcb:
+			if !ok {
+				s.mu.RLock()
+				for _, sc := range s.clients {
+					if sc.handle == nil {
+						continue
+					}
+
+					close(sc.handle)
+					sc.handle = nil
+				}
+				s.mu.RUnlock()
+
+				return nil // chan closure
+			}
+
+			s.mu.RLock()
+			for _, c := range s.clients {
+				c.Send(ctx, p)
+			}
+			s.mu.RUnlock()
+		}
+	}
+}
+
+// Send relays the packet to the attached client session.
+func (c *sessionClient) Send(ctx context.Context, p StreamPacket) {
+	// TODO: convert this to a ring buffer
+	select {
+	case c.handle <- p:
+	case <-ctx.Done():
+	default:
+		slog.Error("failed to send to client", "client", c, "opcode", p.opCode)
+	}
+}
+
+func (s *session) clientSend(ctx context.Context, p StreamPacket) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case s.clientChan <- p:
+	default:
+		return fmt.Errorf("failed to send to client handler: %s", s.id)
+	}
+	return nil
+}
+
+func (c *sessionClient) String() string {
+	return c.info
+}
+
+func (s *session) AddClient(ctx context.Context) (*sessionClient, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := make(chan StreamPacket, clientBuffer)
+	cinfo, ok := peer.FromContext(ctx)
+
+	var clientTag string
+	if ok {
+		clientTag = cinfo.Addr.String()
+	}
+
+	slog.Info("capture session adding client", "session", s.id.String(), "client", clientTag)
+
+	id := uuid.New()
+	c := &sessionClient{
+		handle: ch,
+		info:   clientTag,
+		parent: s,
+		id:     id,
+	}
+	s.clients[id] = c
+
+	return c, nil
+}
+
+func (sc *sessionClient) Close() {
+	slog.Info("client disconnecting", "client", sc.info)
+	sc.parent.mu.Lock()
+	delete(sc.parent.clients, sc.id)
+	sc.parent.mu.Unlock()
+
+	if sc.handle == nil {
+		return
+	}
+
+	close(sc.handle)
+	sc.handle = nil
+}
+
+func (s *session) Proto() *pb.Session {
+	return &pb.Session{
+		Id:     s.id.String(),
+		Source: s.source,
+	}
 }

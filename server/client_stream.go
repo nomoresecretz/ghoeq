@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -64,11 +63,12 @@ const (
 )
 
 type stream struct {
+	id         string
 	key        assembler.Key
 	net        gopacket.Flow
 	port       gopacket.Flow
 	dir        assembler.FlowDirection
-	rb         *ringbuffer.RingBuffer[*eqOldPacket.EQApplication]
+	rb         *ringbuffer.RingBuffer[StreamPacket]
 	sType      streamType
 	sf         *streamFactory
 	gameClient *gameClient
@@ -101,7 +101,7 @@ func (sf *streamFactory) New(ctx context.Context, netFlow, portFlow gopacket.Flo
 		key:      key,
 		net:      netFlow,
 		port:     portFlow,
-		rb:       ringbuffer.New[*eqOldPacket.EQApplication](100),
+		rb:       ringbuffer.New[StreamPacket](100),
 		sf:       sf,
 		clients:  make(map[uuid.UUID]*streamClient),
 		ch:       ch,
@@ -111,7 +111,8 @@ func (sf *streamFactory) New(ctx context.Context, netFlow, portFlow gopacket.Flo
 
 	sf.mgr.mu.Lock()
 	sf.mgr.clientStreams[key] = s
-	sf.mgr.streamMap[key.String()] = key
+	s.id = key.String()
+	sf.mgr.streamMap[s.id] = key
 	sf.mgr.mu.Unlock()
 	slog.Debug("tracking new stream", "stream", s.Proto())
 	sf.wg.Go(func() error {
@@ -156,15 +157,6 @@ func (s *stream) Proto() *pb.Stream {
 	}
 }
 
-func (s *stream) Process(ctx context.Context, l gopacket.Layer, seq uint16) error {
-	p, ok := l.(*eqOldPacket.EQApplication)
-	if !ok {
-		return fmt.Errorf("improper packet type %t", l)
-	}
-
-	return s.HandleAppPacket(ctx, p, seq)
-}
-
 func (s *stream) Close() {
 	s.once.Do(func() { close(s.ch) }) // Lazy fix because I'm tired.
 }
@@ -184,17 +176,12 @@ func (s *stream) FanOut(ctx context.Context, p StreamPacket) error {
 	return nil
 }
 
-func (s *stream) HandleAppPacket(ctx context.Context, p *eqOldPacket.EQApplication, seq uint16) error {
+func (s *stream) Process(ctx context.Context, p StreamPacket) error {
 	s.rb.Add(p) // TODO: store the sequence numbers somehow.
 
 	select {
 	case <-ctx.Done():
-	case s.sf.cout <- StreamPacket{
-		seq:    uint64(seq),
-		stream: s,
-		packet: p,
-		opCode: decoder.OpCode(p.OpCode),
-	}:
+	case s.sf.cout <- p:
 	default:
 		slog.Error("failed to send packet to processing")
 	}

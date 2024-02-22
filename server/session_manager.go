@@ -131,3 +131,16 @@ func (sm *sessionMgr) GracefulStop() {
 	}
 	sm.clientWatch.GracefulStop()
 }
+
+func (sm *sessionMgr) SessionById(sId uuid.UUID) (*session, error) {
+	sm.muSessions.RLock()
+
+	ses, ok := sm.sessions[sId]
+	if !ok {
+		sm.muSessions.RUnlock()
+		return nil, fmt.Errorf("unknown session: %s", sId.String())
+	}
+	sm.muSessions.RUnlock()
+
+	return ses, nil
+}

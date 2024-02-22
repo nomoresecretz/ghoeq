@@ -10,13 +10,18 @@ service BackendServer {
     rpc ListSession (ListRequest) returns (ListSessionResponse) {}
     rpc ListStreams (ListStreamRequest) returns (ListStreamsResponse) {}
     rpc ModifySession (ModifySessionRequest) returns (SessionResponse) {}
+    rpc AttachSessionRaw(AttachSessionRequest) returns (stream APPacket) {}
     rpc AttachClient(AttachClientRequest) returns (stream ClientUpdate) {}
-    rpc AttachStreamRaw(AttachStreamRawRequest) returns (stream APPacket) {} // Simply a stream of decrypted / decompressed opcode + data packets
-    rpc AttachStreamStruct(AttachStreamStructRequest) returns (stream ClientPacket) {} // Normalized proper data packets - long term plan once backend can properly deseralize
+    rpc AttachStreamRaw(AttachStreamRequest) returns (stream APPacket) {} // Simply a stream of decrypted / decompressed opcode + data packets
+    rpc AttachStreamStruct(AttachStreamRequest) returns (stream ClientPacket) {} // Normalized proper data packets - long term plan once backend can properly deseralize
 }
 
 message AttachClientRequest {
     string client_id = 1;
+}
+
+message AttachSessionRequest {
+    string session_id = 1;
 }
 
 message ClientUpdate {
@@ -41,7 +46,7 @@ message ListStreamsResponse {
 
 message SessionResponse {}
 
-message AttachStreamRawRequest {
+message AttachStreamRequest {
     string id = 1; // Start pulling a specific stream, or 0 for first avaliable if one or none.
     string nonce = 2;
     uint64 seq = 3; // Used for resume from previous sequence number. Not implmented yet.
@@ -116,8 +121,6 @@ message APPacket {
 }
 
 message ClientPacket {}
-
-message AttachStreamStructRequest {}
 
 enum PeerType {
     PEER_UNKNOWN = 0;

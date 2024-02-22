@@ -308,3 +308,10 @@ func (c *gameClientWatch) WaitForClient(ctx context.Context, id string) (*gameCl
 
 	return cli, nil
 }
+
+func (c *gameClient) PingChan() chan struct{} {
+	c.mu.RLock()
+	p := c.ping
+	c.mu.RUnlock()
+	return p
+}

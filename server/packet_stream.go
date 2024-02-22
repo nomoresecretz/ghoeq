@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/gopacket/gopacket"
@@ -93,7 +94,7 @@ func (sm *streamMgr) handlePacket(ctx context.Context, p gopacket.Packet, stream
 	// Reassemble fragment packets
 	op, _ := o.(*eqOldPacket.OldEQOuter)
 
-	op, stream, err := streamAsm.Assemble(ctx, p.NetworkLayer().NetworkFlow(), p.TransportLayer().TransportFlow(), op)
+	op, pStream, err := streamAsm.Assemble(ctx, p.NetworkLayer().NetworkFlow(), p.TransportLayer().TransportFlow(), op)
 	if err != nil {
 		return err
 	}
@@ -113,7 +114,19 @@ func (sm *streamMgr) handlePacket(ctx context.Context, p gopacket.Packet, stream
 		return nil
 	}
 
-	if err := stream.Process(ctx, eqold, op.Seq); err != nil {
+	ap, ok := eqold.(*eqOldPacket.EQApplication)
+	if !ok {
+		return fmt.Errorf("improper packet type %t", eqold)
+	}
+
+	sp := StreamPacket{
+		seq:    uint64(op.Seq),
+		stream: pStream.(*stream),
+		packet: ap,
+		opCode: decoder.OpCode(ap.OpCode),
+	}
+
+	if err := pStream.(*stream).Process(ctx, sp); err != nil {
 		return err
 	}
 
@@ -126,4 +139,21 @@ func (sm *streamMgr) Close() {
 	for _, s := range sm.clientStreams {
 		s.Close()
 	}
+}
+
+func (sm *streamMgr) StreamById(streamId string) (*stream, error) {
+	sm.mu.RLock()
+
+	k, ok := sm.streamMap[streamId]
+	if !ok {
+		return nil, fmt.Errorf("unknown stream id: %s", streamId)
+	}
+
+	str, ok := sm.clientStreams[k]
+	if !ok {
+		return nil, fmt.Errorf("missing stream: %s", k.String())
+	}
+	sm.mu.RUnlock()	
+
+	return str, nil
 }

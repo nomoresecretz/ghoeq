@@ -81,11 +81,8 @@ func (s *ghoeqServer) ListSession(ctx context.Context, p *pb.ListRequest) (*pb.L
 	s.sMgr.muSessions.RLock()
 	defer s.sMgr.muSessions.RUnlock()
 
-	for id, session := range s.sMgr.sessions {
-		sessions = append(sessions, &pb.Session{
-			Id:     id.String(),
-			Source: session.source,
-		})
+	for _, session := range s.sMgr.sessions {
+		sessions = append(sessions, session.Proto())
 	}
 
 	return &pb.ListSessionResponse{
@@ -95,18 +92,9 @@ func (s *ghoeqServer) ListSession(ctx context.Context, p *pb.ListRequest) (*pb.L
 
 // ListStreams lists the current known client streams. A stream is 1 client session, but it can contain multiple independent substreams.
 func (s *ghoeqServer) ListStreams(ctx context.Context, r *pb.ListStreamRequest) (*pb.ListStreamsResponse, error) {
-	sID := r.GetSessionId()
-	s.sMgr.muSessions.RLock()
-
-	uuid, err := uuid.Parse(sID)
+	sess, err := s.getSession(r.GetSessionId())
 	if err != nil {
-		return nil, fmt.Errorf("invalid session id format: %w", err)
-	}
-
-	sess, ok := s.sMgr.sessions[uuid]
-	if !ok {
-		s.sMgr.muSessions.RUnlock()
-		return nil, fmt.Errorf("unknown session: %s", sID)
+		return nil, err
 	}
 
 	sess.mu.RLock()
@@ -157,8 +145,12 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 
 	seen := make(map[string]struct{})
 
-	var strz []*pb.Stream
+	// Read lock the client, then grab the notice channel, and all the streams in one go before unlock.
+	var p chan struct{}
 	cli.mu.RLock()
+	p = cli.ping
+
+	var strz []*pb.Stream
 	for _, v := range cli.streams {
 		streamProto := v.Proto()
 		session := v.sf.mgr.session
@@ -166,7 +158,7 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 			Id: session.id.String(),
 		}
 		strz = append(strz, streamProto)
-		seen[streamProto.Id] = struct{}{}
+		seen[v.id] = struct{}{}
 	}
 	cli.mu.RUnlock()
 
@@ -175,25 +167,18 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 		return err
 	}
 
-	var p chan struct{}
-	cli.mu.RLock()
-	p = cli.ping
-	cli.mu.RUnlock()
-
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-p:
-			cli.mu.RLock()
-			p = cli.ping
-			cli.mu.RUnlock()
+			p = cli.PingChan()
 
 			var strz []*pb.Stream
 
 			for _, v := range cli.streams {
 				streamProto := v.Proto()
-				if _, ok := seen[streamProto.Id]; ok {
+				if _, ok := seen[v.id]; ok {
 					continue
 				}
 				slog.Debug("notifying watcher of new gameClient stream")
@@ -202,43 +187,35 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 					Id: session.id.String(),
 				}
 				strz = append(strz, streamProto)
-				seen[streamProto.Id] = struct{}{}
+				seen[v.id] = struct{}{}
 			}
 			stream.Send(&pb.ClientUpdate{Streams: strz})
 		}
 	}
 }
 
-// AttachStreamRaw provides a single full client stream of decrypted but unprocessed EQApplication packets.
-func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRawRequest, stream pb.BackendServer_AttachStreamRawServer) error {
-	ctx := stream.Context()
-	// Get a pull channel
-	sid := r.GetSessionId()
-	sId, err := uuid.Parse(sid)
+func (s ghoeqServer) getSession(sessionId string) (*session, error) {
+	sId, err := uuid.Parse(sessionId)
 	if err != nil {
-		return fmt.Errorf("invalid id format: %w", err)
+		return nil, fmt.Errorf("invalid id format: %w", err)
 	}
 
-	s.sMgr.muSessions.RLock()
+	return s.sMgr.SessionById(sId)
+}
 
-	ses, ok := s.sMgr.sessions[sId]
-	if !ok {
-		s.sMgr.muSessions.RUnlock()
-		return fmt.Errorf("unknown session: %s", sid)
-	}
-	s.sMgr.muSessions.RUnlock()
-	ses.sm.mu.RLock()
+// AttachStreamRaw provides a single full client stream of decrypted but unprocessed EQApplication packets.
+func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRequest, stream pb.BackendServer_AttachStreamRawServer) error {
+	ctx := stream.Context()
 
-	k, ok := ses.sm.streamMap[r.GetId()]
-	if !ok {
-		return fmt.Errorf("unknown stream id: %s", r.GetId())
+	ses, err := s.getSession(r.GetSessionId())
+	if err != nil {
+		return err
 	}
 
-	str, ok := ses.sm.clientStreams[k]
-	if !ok {
-		return fmt.Errorf("missing stream: %s", k.String())
+	str, err := ses.sm.StreamById(r.GetId())
+	if err != nil {
+		return err
 	}
-	ses.sm.mu.RUnlock()
 
 	cStream, err := str.AttachToStream(ctx)
 	if err != nil {
@@ -252,11 +229,14 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRawRequest, stream pb.Ba
 	// send the backlog of packets seen before they attached.
 	op := str.rb.GetAll()
 	slog.Debug("sending packet backlog")
+
+	seen := make(map[uint64]struct{})
 	for _, p := range op {
+		seen[p.seq] = struct{}{}
 		outP := &pb.APPacket{
-			//			Seq:    p.seq,
-			OpCode: uint32(p.OpCode),
-			Data:   p.Payload,
+			Seq:    p.seq,
+			OpCode: uint32(p.opCode),
+			Data:   p.packet.Payload,
 		}
 		if err := stream.Send(outP); err != nil {
 			return err
@@ -275,10 +255,57 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRawRequest, stream pb.Ba
 				return nil
 			}
 
+			// Avoid double send
+			if _, ok := seen[p.seq]; ok {
+				continue
+			}
+
 			op := &pb.APPacket{
 				Seq:    p.seq,
 				OpCode: uint32(p.packet.OpCode),
 				Data:   p.packet.Payload,
+			}
+
+			if err := stream.Send(op); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// AttachSessionRaw provides a raw feed of a capture session app packets. Mostly intended for debugging.
+func (s *ghoeqServer) AttachSessionRaw(r *pb.AttachSessionRequest, stream pb.BackendServer_AttachSessionRawServer) error {
+	ctx := stream.Context()
+
+	ses, err := s.getSession(r.GetSessionId())
+	if err != nil {
+		return err
+	}
+
+	cStream, err := ses.AddClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	slog.Debug("client added a stream watch")
+
+	defer cStream.Close()
+
+	// loop sending the packets to the client
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case p, ok := <-cStream.handle:
+			if !ok {
+				return nil
+			}
+
+			op := &pb.APPacket{
+				Seq:      p.seq,
+				OpCode:   uint32(p.packet.OpCode),
+				Data:     p.packet.Payload,
+				StreamId: p.stream.id,
 			}
 
 			if err := stream.Send(op); err != nil {
