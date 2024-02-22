@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 )
 
 type ghoeqServer struct {
@@ -153,10 +154,7 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 	var strz []*pb.Stream
 	for _, v := range cli.streams {
 		streamProto := v.Proto()
-		session := v.sf.mgr.session
-		streamProto.Session = &pb.Session{
-			Id: session.id.String(),
-		}
+		streamProto.Session = v.sf.mgr.session.Proto()
 		strz = append(strz, streamProto)
 		seen[v.id] = struct{}{}
 	}
@@ -182,10 +180,7 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 					continue
 				}
 				slog.Debug("notifying watcher of new gameClient stream")
-				session := v.sf.mgr.session
-				streamProto.Session = &pb.Session{
-					Id: session.id.String(),
-				}
+				streamProto.Session = v.sf.mgr.session.Proto()
 				strz = append(strz, streamProto)
 				seen[v.id] = struct{}{}
 			}
@@ -233,11 +228,7 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRequest, stream pb.Backe
 	seen := make(map[uint64]struct{})
 	for _, p := range op {
 		seen[p.seq] = struct{}{}
-		outP := &pb.APPacket{
-			Seq:    p.seq,
-			OpCode: uint32(p.opCode),
-			Data:   p.packet.Payload,
-		}
+		outP := p.Proto()
 		if err := stream.Send(outP); err != nil {
 			return err
 		}
@@ -245,32 +236,7 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRequest, stream pb.Backe
 
 	slog.Debug("looping new packets")
 
-	// loop sending the packets to the client
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case p, ok := <-cStream.handle:
-			if !ok {
-				return nil
-			}
-
-			// Avoid double send
-			if _, ok := seen[p.seq]; ok {
-				continue
-			}
-
-			op := &pb.APPacket{
-				Seq:    p.seq,
-				OpCode: uint32(p.packet.OpCode),
-				Data:   p.packet.Payload,
-			}
-
-			if err := stream.Send(op); err != nil {
-				return err
-			}
-		}
-	}
+	return s.sendLoop(ctx, cStream.handle, stream, seen)
 }
 
 // AttachSessionRaw provides a raw feed of a capture session app packets. Mostly intended for debugging.
@@ -291,22 +257,31 @@ func (s *ghoeqServer) AttachSessionRaw(r *pb.AttachSessionRequest, stream pb.Bac
 
 	defer cStream.Close()
 
+	return s.sendLoop(ctx, cStream.handle, stream, make(map[uint64]struct{}))
+}
+
+type streamSender interface {
+	Send(*pb.APPacket) error
+	grpc.ServerStream
+}
+
+func (s *ghoeqServer) sendLoop(ctx context.Context, handle <-chan StreamPacket, stream streamSender, seen map[uint64]struct{}) error {
 	// loop sending the packets to the client
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case p, ok := <-cStream.handle:
+		case p, ok := <-handle:
 			if !ok {
 				return nil
 			}
 
-			op := &pb.APPacket{
-				Seq:      p.seq,
-				OpCode:   uint32(p.packet.OpCode),
-				Data:     p.packet.Payload,
-				StreamId: p.stream.id,
+			// Avoid double send
+			if _, ok := seen[p.seq]; ok {
+				continue
 			}
+
+			op := p.Proto()
 
 			if err := stream.Send(op); err != nil {
 				return err

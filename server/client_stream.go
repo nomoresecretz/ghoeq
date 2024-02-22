@@ -94,6 +94,14 @@ type StreamPacket struct {
 	opCode decoder.OpCode
 }
 
+func (s *StreamPacket) Proto() *pb.APPacket {
+	return &pb.APPacket{
+		Seq: s.seq,
+		OpCode: uint32(s.opCode),
+		Data: s.packet.Payload,
+	}
+}
+
 func (sf *streamFactory) New(ctx context.Context, netFlow, portFlow gopacket.Flow, l gopacket.Layer, ac assembler.AssemblerContext) assembler.Stream {
 	key := assembler.Key{netFlow, portFlow}
 	ch := make(chan StreamPacket, packetBufferSize)
