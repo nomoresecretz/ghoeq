@@ -32,7 +32,7 @@ type EQStruct interface {
 }
 
 type EQTypes interface {
-	uint8 | uint16 | uint32 | string | []byte
+	uint8 | uint16 | uint32 | int8 | int16 | int32 | float32 | string | []byte
 }
 
 func EQRead[T EQTypes](b []byte, s EQStruct, field *T, size int) error {
@@ -41,8 +41,16 @@ func EQRead[T EQTypes](b []byte, s EQStruct, field *T, size int) error {
 		return EQReadUint32(b, s, t)
 	case *uint16:
 		return EQReadUint16(b, s, t)
+	case *int16:
+		return EQReadInt16(b, s, t)
+	case *int8:
+		return EQReadInt8(b, s, t)
+	case *int32:
+		return EQReadInt32(b, s, t)
 	case *uint8:
 		return EQReadUint8(b, s, t)
+	case *float32:
+		return EQReadFloat32(b, s, t)
 	case *[]byte:
 		return EQReadBytes(b, s, t, size)
 	case *string:
@@ -73,11 +81,47 @@ func EQReadUint16(b []byte, s EQStruct, field *uint16) error {
 	return nil
 }
 
+func EQReadInt16(b []byte, s EQStruct, field *int16) error {
+	p := s.bp()
+	c := b[*p:]
+	*field = int16(binary.LittleEndian.Uint16(c))
+	*p += 2
+
+	return nil
+}
+
+func EQReadInt32(b []byte, s EQStruct, field *int32) error {
+	p := s.bp()
+	c := b[*p:]
+	*field = int32(binary.LittleEndian.Uint32(c))
+	*p += 4
+
+	return nil
+}
+
 func EQReadUint8(b []byte, s EQStruct, field *uint8) error {
 	p := s.bp()
 	c := b[*p]
 	*field = uint8(c)
 	*p++
+
+	return nil
+}
+
+func EQReadInt8(b []byte, s EQStruct, field *int8) error {
+	p := s.bp()
+	c := b[*p]
+	*field = int8(c)
+	*p++
+
+	return nil
+}
+
+func EQReadFloat32(b []byte, s EQStruct, field *float32) error {
+	p := s.bp()
+	c := b[*p]
+	*field = float32(c)
+	*p += 4
 
 	return nil
 }
@@ -97,7 +141,7 @@ func EQReadString(b []byte, s EQStruct, field *string, maxLength int) error {
 	p := s.bp()
 
 	bh := make([]byte, maxLength)
-	stop := min(len(b)-*p, *p+maxLength+1)
+	stop := min(len(b), *p+maxLength+1)
 	copy(bh, b[*p:stop])
 	bh = bytes.Trim(bh, "\x00")
 	*field = string(bh)

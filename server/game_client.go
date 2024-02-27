@@ -42,9 +42,10 @@ type gameClient struct {
 	ping            chan struct{}
 	decoder         opDecoder
 	parent          *gameClientWatch
-	clientServer    string // game server name.
-	clientSessionID string // Assigned by server.
-	clientCharacter string // game client character.
+	clientServer    string                 // game server name.
+	clientSessionID string                 // Assigned by server.
+	clientCharacter string                 // game client character.
+	PlayerProfile   eqStruct.PlayerProfile // temporary for testing.
 }
 
 func NewPredict(gc *gameClient, s streamType, dir assembler.FlowDirection) predictEntry {
@@ -266,6 +267,13 @@ func (c *gameClient) Run(p StreamPacket) error {
 			c.clientServer = ls.ShortName
 		}
 
+	case op == "OP_PlayerProfile" && p.stream.dir == assembler.DirServerToClient:
+		ls := eqStruct.PlayerProfile{}
+		if err := ls.Unmarshal(p.packet.Payload); err != nil {
+			return err
+		}
+		c.PlayerProfile = ls
+
 	case op == "OP_EnterWorld":
 		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
 		ew := eqStruct.EnterWorld{}
@@ -280,6 +288,7 @@ func (c *gameClient) Run(p StreamPacket) error {
 		if c.clientCharacter == "" {
 			c.clientCharacter = ew.Name
 		}
+
 		if c.matchChar(ew.Name) {
 			return nil
 		}
@@ -328,7 +337,7 @@ func (c *gameClient) Run(p StreamPacket) error {
 		if c.matchAcct(li.Account) {
 			return nil
 		}
-		
+
 		c.clientSessionID = li.Account
 		if err := c.parent.RegisterAcct(c); err != nil {
 			return err
