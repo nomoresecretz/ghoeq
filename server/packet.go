@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"time"
 
 	"github.com/gopacket/gopacket"
@@ -12,6 +13,8 @@ import (
 var (
 	capTimeout  = 250 * time.Millisecond
 	promiscuous = true
+	immediate   = true
+	bufSize     = 4096 // I doubt we're gonna see jumbo packets.
 )
 
 type capture struct {
@@ -31,12 +34,34 @@ func NewCapture(h *pcap.Handle) *capture {
 }
 
 // Packets returns a packets channel. To eventually be replaced by a ring buffer system.
-func (c *capture) Packets() chan gopacket.Packet {
-	return c.s.Packets()
+func (c *capture) Packets(ctx context.Context) chan gopacket.Packet {
+	return c.s.PacketsCtx(ctx)
 }
 
 func liveHandle(d string) (*pcap.Handle, error) {
-	return pcap.OpenLive(d, 1024, promiscuous, capTimeout)
+	h, err := pcap.NewInactiveHandle(d)
+	if err != nil {
+		return nil, err
+	}
+	defer h.CleanUp()
+
+	if err = h.SetBufferSize(bufSize); err != nil {
+		return nil, err
+	}
+
+	if err = h.SetTimeout(capTimeout); err != nil {
+		return nil, err
+	}
+
+	if err = h.SetImmediateMode(immediate); err != nil {
+		return nil, err
+	}
+
+	if err = h.SetPromisc(promiscuous); err != nil {
+		return nil, err
+	}
+
+	return h.Activate()
 }
 
 /*

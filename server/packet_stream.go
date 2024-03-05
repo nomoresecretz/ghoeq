@@ -52,7 +52,7 @@ func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<-
 	defer streamFactory.Close()
 
 	c := NewCapture(h)
-	pChan := c.Packets()
+	pChan := c.Packets(ctx)
 
 	defer close(cout)
 
