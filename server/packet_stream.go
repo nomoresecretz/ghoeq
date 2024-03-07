@@ -7,7 +7,7 @@ import (
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/pcap"
-	"github.com/nomoresecretz/ghoeq/common/decoder"
+	"github.com/nomoresecretz/ghoeq-common/decoder"
 	"github.com/nomoresecretz/ghoeq/common/eqOldPacket"
 	"github.com/nomoresecretz/ghoeq/server/assembler"
 	"golang.org/x/sync/errgroup"
@@ -120,6 +120,7 @@ func (sm *streamMgr) handlePacket(ctx context.Context, p gopacket.Packet, stream
 	}
 
 	sp := StreamPacket{
+		origin: p.Metadata().Timestamp,
 		seq:    uint64(op.Seq),
 		stream: pStream.(*stream),
 		packet: ap,
@@ -153,7 +154,7 @@ func (sm *streamMgr) StreamById(streamId string) (*stream, error) {
 	if !ok {
 		return nil, fmt.Errorf("missing stream: %s", k.String())
 	}
-	sm.mu.RUnlock()	
+	sm.mu.RUnlock()
 
 	return str, nil
 }

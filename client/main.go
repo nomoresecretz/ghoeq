@@ -9,8 +9,8 @@ import (
 	"os"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/nomoresecretz/ghoeq/common/decoder"
-	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
+	"github.com/nomoresecretz/ghoeq-common/decoder"
+	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -26,6 +26,7 @@ var (
 // Simple rpc test client
 func main() {
 	flag.Parse()
+
 	err := doStuff(context.Background())
 	if err != nil {
 		slog.Error("failed to do x: %w", err)
@@ -52,6 +53,7 @@ func doStuff(ctx context.Context) error {
 			return err
 		}
 	}
+
 	c := pb.NewBackendServerClient(conn)
 
 	switch {
@@ -85,27 +87,34 @@ func followClient(ctx context.Context, c pb.BackendServerClient, d dec) error {
 
 	eg.Go(func() error {
 		var client *pb.Client
+
 		cs, err := c.AttachClient(gctx, &pb.AttachClientRequest{})
 		if err != nil {
 			return err
 		}
+
 		for {
 			c, err := cs.Recv()
 			if err == io.EOF {
 				slog.Info("server/client ended stream")
+
 				break
 			}
+
 			if err != nil {
 				return err
 			}
+
 			if cli := c.GetClient(); client == nil && cli != nil {
 				client = cli
 				slog.Info("attached to new client", "address", client.Address, "ID", client.Id)
 			}
+
 			for _, s := range c.GetStreams() {
 				newStream(s)
 			}
 		}
+
 		return nil
 	})
 
@@ -114,14 +123,14 @@ func followClient(ctx context.Context, c pb.BackendServerClient, d dec) error {
 
 func followStream(ctx context.Context, stream *pb.Stream, c pb.BackendServerClient, d dec) error {
 	var err error
-	s, err := c.AttachStreamRaw(ctx, &pb.AttachStreamRequest{
+	s, err := c.AttachStreamStruct(ctx, &pb.AttachStreamRequest{
 		Id:        stream.GetId(),
-		Nonce:     "0",
 		SessionId: stream.GetSession().GetId(),
 	})
 	if err != nil {
 		return err
 	}
+
 	sType := stream.GetType().String()
 	sDir := stream.GetDirection()
 	sAddr := stream.GetAddress()
@@ -130,25 +139,52 @@ func followStream(ctx context.Context, stream *pb.Stream, c pb.BackendServerClie
 	sPeerPort := stream.GetPeerPort()
 
 	slog.Info("connected, beginning stream")
+
 	for {
 		p, err := s.Recv()
 		if err == io.EOF {
 			slog.Info("server ended stream")
+
 			break
 		}
+
 		if err != nil {
 			return err
 		}
 		opRaw := p.GetOpCode()
+
 		op := d.GetOp(decoder.OpCode(opRaw))
 		if op == "" {
 			op = fmt.Sprintf("%#4x", opRaw)
 		}
+
 		// TODO: Add api to push/pull opcode definitions from server.
 		//		si := p.GetStreamInfo()
+
+		if str := p.GetStruct(); str != nil {
+
+			msg := str.GetMsg()
+			if msg == nil {
+				break
+			}
+
+			dstr, err := msg.UnmarshalNew()
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("StreamInfo %s %s %s:%s->%s:%s\n", sType, sDir, sAddr, sPort, sPeerAddr, sPeerPort)
+			fmt.Printf("Packet %0#4x : OpCode %s\n", p.GetSeq(), op)
+			spew.Dump(dstr)
+			fmt.Println()
+
+			continue
+		}
+
 		fmt.Printf("StreamInfo %s %s %s:%s->%s:%s\n", sType, sDir, sAddr, sPort, sPeerAddr, sPeerPort)
 		fmt.Printf("Packet %0#4x : OpCode %s %s\n", p.GetSeq(), op, spew.Sdump(p.GetData()))
 	}
+
 	return nil
 }
 
@@ -157,11 +193,13 @@ func getSessionID(ctx context.Context, c pb.BackendServerClient) (string, error)
 	if err != nil {
 		return "", err
 	}
+
 	if len(s.Sessions) == 0 {
 		src, err := getSource(ctx, c)
 		if err != nil {
 			return "", err
 		}
+
 		_, err = c.ModifySession(ctx, &pb.ModifySessionRequest{
 			Nonce: "0",
 			Mods: []*pb.ModifyRequest{
@@ -174,19 +212,22 @@ func getSessionID(ctx context.Context, c pb.BackendServerClient) (string, error)
 		if err != nil {
 			return "", err
 		}
+
 		s, err = c.ListSession(ctx, &pb.ListRequest{})
 		if err != nil {
 			return "", err
 		}
 	}
+
 	switch l := len(s.GetSessions()); {
 	case l == 0:
-		return "", fmt.Errorf("no capture session avaliable")
+		return "", fmt.Errorf("no capture session available")
 	case l > 1:
 		return "", fmt.Errorf("too many active sessions to pick one. select manually")
 	}
 	session := s.GetSessions()[0]
 	slog.Info("identified capture session", "session", session)
+
 	return session.GetId(), nil
 }
 
@@ -194,14 +235,17 @@ func getSource(ctx context.Context, c pb.BackendServerClient) (string, error) {
 	if *src != "" {
 		return *src, nil
 	}
+
 	s, err := c.ListSources(ctx, &pb.ListRequest{})
 	if err != nil {
 		return "", err
 	}
+
 	sources := s.GetSources()
 	if len(sources) != 1 {
 		return "", fmt.Errorf("too many sources, pick one manually")
 	}
+
 	return sources[0].GetId(), nil
 }
 
@@ -217,11 +261,14 @@ func followSource(ctx context.Context, c pb.BackendServerClient, d dec) error {
 		if s, ok := streamInfo[streamId]; ok {
 			return s, nil
 		}
+
 		s, err := getStream(ctx, c, sessionId, streamId)
 		if err != nil {
 			return nil, err
 		}
+
 		streamInfo[streamId] = s
+
 		return s, nil
 	}
 
@@ -232,17 +279,23 @@ func followSource(ctx context.Context, c pb.BackendServerClient, d dec) error {
 	if err != nil {
 		return err
 	}
+
 	slog.Info("connected, beginning stream")
+
 	for {
 		p, err := stream.Recv()
 		if err == io.EOF {
 			slog.Info("server ended stream")
+
 			break
 		}
+
 		if err != nil {
 			return err
 		}
+
 		opRaw := p.GetOpCode()
+
 		op := d.GetOp(decoder.OpCode(opRaw))
 		if op == "" {
 			op = fmt.Sprintf("%#4x", opRaw)
@@ -252,10 +305,6 @@ func followSource(ctx context.Context, c pb.BackendServerClient, d dec) error {
 		if streamId != "" {
 			stream, err := getStreamInfo(ctx, p.StreamId)
 			if err != nil {
-				return err
-			}
-
-			if err != nil {
 				return fmt.Errorf("failed to get stream info: %w", err)
 			}
 
@@ -264,8 +313,10 @@ func followSource(ctx context.Context, c pb.BackendServerClient, d dec) error {
 
 		if op == "OP_PlayerProfile" {
 			fmt.Printf("Packet %#04x : OpCode %s %s\n", p.GetSeq(), op, "snip")
+
 			continue
 		}
+
 		fmt.Printf("Packet %#04x : OpCode %s %s\n", p.GetSeq(), op, spew.Sdump(p.GetData()))
 	}
 
@@ -279,6 +330,7 @@ func getStream(ctx context.Context, c pb.BackendServerClient, sessionId, streamI
 	}
 
 	streams := r.GetStreams()
+
 	l := len(streams)
 	if l != 1 {
 		return nil, fmt.Errorf("incorrect stream count: got %d, want 1", l)

@@ -6,9 +6,13 @@ import (
 	"log/slog"
 
 	"github.com/google/uuid"
-	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
+	structPb "github.com/nomoresecretz/ghoeq-common/proto/eqstruct"
+	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+	timepb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type ghoeqServer struct {
@@ -239,7 +243,57 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRequest, stream pb.Backe
 
 	slog.Debug("looping new packets")
 
-	return s.sendLoop(ctx, cStream.handle, stream, seen)
+	return s.sendLoopRaw(ctx, cStream.handle, stream, seen)
+}
+
+type eqProto interface {
+	ProtoMess() proto.Message
+}
+
+// AttachStreamRaw provides a single full client stream of decrypted but unprocessed EQApplication packets.
+func (s *ghoeqServer) AttachStreamStruct(r *pb.AttachStreamRequest, stream pb.BackendServer_AttachStreamStructServer) error {
+	ctx := stream.Context()
+
+	ses, err := s.getSession(r.GetSessionId())
+	if err != nil {
+		return err
+	}
+
+	str, err := ses.sm.StreamById(r.GetId())
+	if err != nil {
+		return err
+	}
+
+	cStream, err := str.AttachToStream(ctx)
+	if err != nil {
+		return err
+	}
+
+	slog.Debug("client added a stream watch")
+
+	defer cStream.Close()
+
+	// send the backlog of packets seen before they attached.
+	op := str.rb.GetAll()
+	slog.Debug("sending packet backlog")
+
+	seen := make(map[uint64]struct{})
+	for _, p := range op {
+		seen[p.seq] = struct{}{}
+
+		outP, err := makeOutStructPacket(p)
+		if err != nil {
+			return err
+		}
+
+		if err := stream.Send(outP); err != nil {
+			return err
+		}
+	}
+
+	slog.Debug("looping new packets")
+
+	return s.sendLoopStruct(ctx, cStream.handle, stream, seen)
 }
 
 // AttachSessionRaw provides a raw feed of a capture session app packets. Mostly intended for debugging.
@@ -260,7 +314,7 @@ func (s *ghoeqServer) AttachSessionRaw(r *pb.AttachSessionRequest, stream pb.Bac
 
 	defer cStream.Close()
 
-	return s.sendLoop(ctx, cStream.handle, stream, nil)
+	return s.sendLoopRaw(ctx, cStream.handle, stream, nil)
 }
 
 type streamSender interface {
@@ -268,7 +322,12 @@ type streamSender interface {
 	grpc.ServerStream
 }
 
-func (s *ghoeqServer) sendLoop(ctx context.Context, handle <-chan StreamPacket, stream streamSender, seen map[uint64]struct{}) error {
+type streamSenderStruct interface {
+	Send(*pb.ClientPacket) error
+	grpc.ServerStream
+}
+
+func (s *ghoeqServer) sendLoopRaw(ctx context.Context, handle <-chan StreamPacket, stream streamSender, seen map[uint64]struct{}) error {
 	// loop sending the packets to the client
 	for {
 		select {
@@ -297,8 +356,85 @@ func (s *ghoeqServer) sendLoop(ctx context.Context, handle <-chan StreamPacket, 
 	}
 }
 
+func (s *ghoeqServer) sendLoopStruct(ctx context.Context, handle <-chan StreamPacket, stream streamSenderStruct, seen map[uint64]struct{}) error {
+	// loop sending the packets to the client
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case p, ok := <-handle:
+			if !ok {
+				return nil
+			}
+
+			// Avoid double send
+			if seen != nil {
+				if _, ok := seen[p.seq]; ok {
+					continue
+				}
+				seen[p.seq] = struct{}{}
+				delete(seen, p.seq-100)
+			}
+
+			outP, err := makeOutStructPacket(p)
+			if err != nil {
+				return err
+			}
+
+			if err := stream.Send(outP); err != nil {
+				return err
+			}
+		}
+	}
+}
+
 // GracefulStop cleanly shuts down the server closing out all operations as possible.
 func (s *ghoeqServer) GracefulStop() {
 	slog.Info("server shutdown requested")
 	s.sMgr.GracefulStop()
+}
+
+func makeOutStructPacket(p StreamPacket) (*pb.ClientPacket, error) {
+	eqstr, err := getMsg(p)
+	if err != nil {
+		return nil, err
+	}
+
+	outP := &pb.ClientPacket{
+		Origin: timepb.New(p.origin),
+		Seq:    p.seq,
+		OpCode: uint32(p.opCode),
+		Struct: eqstr,
+	}
+	if eqstr == nil {
+		outP.Data = p.packet.Payload
+	}
+
+	return outP, nil
+}
+
+func getMsg(p StreamPacket) (*structPb.DataStruct, error) {
+	if p.Obj == nil && p.packet.OpCode != 0x5f41 {
+		return nil, nil
+	}
+
+	obj, ok := p.Obj.(eqProto)
+	if !ok {
+		return nil, nil
+	}
+
+	msg := obj.ProtoMess()
+	if msg == nil {
+		return nil, nil
+	}
+
+	anyMsg, err := anypb.New(msg)
+	if err != nil {
+		return nil, err
+	}
+
+	return &structPb.DataStruct{
+		Type: structPb.StructType(p.Obj.EQType()),
+		Msg:  anyMsg,
+	}, nil
 }

@@ -27,6 +27,8 @@ opcodes.txt
 
 # Go workspace file
 go.work
+go.work.sum
 
 # VScode stuff
 .vscode/
+*.code-workspace

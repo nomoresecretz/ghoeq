@@ -118,7 +118,9 @@ func (sm *sessionMgr) runCapture(ctx context.Context, src string, c chan<- reply
 // cleanSession removes the capture session from tracking and any cleanup.
 func (s *sessionMgr) cleanSession(i uuid.UUID) {
 	s.muSessions.Lock()
+	ses := s.sessions[i]
 	delete(s.sessions, i)
+	ses.Close()
 	s.muSessions.Unlock()
 }
 

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nomoresecretz/ghoeq/common/eqStruct"
+	"github.com/nomoresecretz/ghoeq-common/eqStruct"
 	"github.com/nomoresecretz/ghoeq/server/assembler"
 )
 
@@ -42,10 +42,10 @@ type gameClient struct {
 	ping            chan struct{}
 	decoder         opDecoder
 	parent          *gameClientWatch
-	clientServer    string                 // game server name.
-	clientSessionID string                 // Assigned by server.
-	clientCharacter string                 // game client character.
-	PlayerProfile   eqStruct.PlayerProfile // temporary for testing.
+	clientServer    string                  // game server name.
+	clientSessionID string                  // Assigned by server.
+	clientCharacter string                  // game client character.
+	PlayerProfile   *eqStruct.PlayerProfile // temporary for testing.
 }
 
 func NewPredict(gc *gameClient, s streamType, dir assembler.FlowDirection) predictEntry {
@@ -81,6 +81,7 @@ func (c *gameClientWatch) newClient() *gameClient {
 	c.clients[gc.id] = gc
 	close(c.ping)
 	c.ping = make(chan struct{})
+
 	slog.Debug("new game client tracked", "client", gc.id)
 
 	return gc
@@ -99,11 +100,12 @@ func (c *gameClient) LockedPing() {
 	c.ping = make(chan struct{})
 }
 
-func (c *gameClientWatch) CheckFull(p StreamPacket, pr predictEntry, b bool) bool {
+func (c *gameClientWatch) CheckFull(p *StreamPacket, pr predictEntry, b bool) bool {
 	invalid := time.Now().Add(maxPredictTime)
 	if !b || pr.created.After(invalid) {
 		return false
 	}
+
 	p.stream.dir = pr.dir
 	p.stream.sType = pr.sType
 	p.stream.gameClient = pr.client
@@ -117,7 +119,7 @@ func (c *gameClientWatch) CheckFull(p StreamPacket, pr predictEntry, b bool) boo
 	return true
 }
 
-func (c *gameClientWatch) CheckReverse(p StreamPacket, rpr predictEntry, b bool) bool {
+func (c *gameClientWatch) CheckReverse(p *StreamPacket, rpr predictEntry, b bool) bool {
 	invalid := time.Now().Add(maxPredictTime)
 	if !b || rpr.created.After(invalid) {
 		return false
@@ -126,14 +128,17 @@ func (c *gameClientWatch) CheckReverse(p StreamPacket, rpr predictEntry, b bool)
 	p.stream.dir = rpr.dir.Reverse()
 	p.stream.sType = rpr.sType
 	p.stream.gameClient = rpr.client
+
 	if rpr.client == nil {
 		return true
 	}
+
 	rpr.client.AddStream(p.stream)
+
 	return true
 }
 
-func (c *gameClientWatch) CheckHalf(p StreamPacket) bool {
+func (c *gameClientWatch) CheckHalf(p *StreamPacket) bool {
 	testKey := fmt.Sprintf("dst-%s:%s", p.stream.net.Dst().String(), p.stream.port.Dst().String())
 	testKeyR := fmt.Sprintf("src-%s:%s", p.stream.net.Src().String(), p.stream.port.Src().String())
 
@@ -173,7 +178,7 @@ func (c *gameClientWatch) CheckHalf(p StreamPacket) bool {
 	return false
 }
 
-func (c *gameClientWatch) Check(p StreamPacket) bool {
+func (c *gameClientWatch) Check(p *StreamPacket) bool {
 	c.mu.RLock()
 	pr, ok1 := c.predicted[p.stream.key.String()]
 	rv := p.stream.key.Reverse()
@@ -195,7 +200,7 @@ func (c *gameClientWatch) Check(p StreamPacket) bool {
 	return false
 }
 
-func (c *gameClientWatch) newPredictClient(p StreamPacket) {
+func (c *gameClientWatch) newPredictClient(p *StreamPacket) {
 	rv := p.stream.key.Reverse()
 	cli := c.newClient()
 	slog.Info("unknown/new client thread seen, adding client", "client", cli.id, "streamtype", p.stream.sType.String())
@@ -208,6 +213,7 @@ func (gw *gameClientWatch) GracefulStop() {
 	for _, gc := range gw.clients {
 		gc.Close()
 	}
+
 	gw.mu.Lock()
 	defer gw.mu.Unlock()
 	close(gw.ping)
@@ -237,128 +243,38 @@ func (c *gameClient) Close() {
 	c.parent.mu.Unlock()
 }
 
-func (c *gameClient) Run(p StreamPacket) error {
+func (c *gameClient) Run(p *StreamPacket) error {
 	op := c.decoder.GetOp(p.opCode)
+
 	switch {
 	case op == "":
 		slog.Debug("game client unknown opcode", "opcode", p.opCode.String())
 	case op == "OP_PlayEverquestRequest":
-		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
-		ply := &eqStruct.PlayRequest{}
-		if err := ply.Unmarshal(p.packet.Payload); err != nil {
-			return err
-		}
-
-		Key := fmt.Sprintf("%s:%d", ply.IP, 9000)
-		fKey, rKey := "dst-"+Key, "src-"+Key
-		c.parent.mu.Lock()
-		c.parent.predicted[fKey] = NewPredict(c, ST_WORLD, assembler.DirClientToServer)
-		c.parent.predicted[rKey] = NewPredict(c, ST_WORLD, assembler.DirServerToClient)
-		c.parent.mu.Unlock()
-
+		return c.handlePlayEQ(p)
 	case op == "OP_LogServer" && p.stream.dir == assembler.DirServerToClient:
-		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
-		ls := eqStruct.LogServer{}
-		if err := ls.Unmarshal(p.packet.Payload); err != nil {
-			return err
-		}
-
-		if c.clientServer == "" {
-			c.clientServer = ls.ShortName
-		}
-
+		return c.handleLogServer(p)
 	case op == "OP_PlayerProfile" && p.stream.dir == assembler.DirServerToClient:
-		ls := eqStruct.PlayerProfile{}
-		if err := ls.Unmarshal(p.packet.Payload); err != nil {
-			return err
-		}
-		c.PlayerProfile = ls
-
+		return c.handlePlayerProfile(p)
 	case op == "OP_EnterWorld":
-		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
-		ew := eqStruct.EnterWorld{}
-		if err := ew.Unmarshal(p.packet.Payload); err != nil {
-			return err
-		}
-
-		if c.matchChar(ew.Name) {
-			return nil
-		}
-
-		if c.clientCharacter == "" {
-			c.clientCharacter = ew.Name
-		}
-
-		if c.matchChar(ew.Name) {
-			return nil
-		}
-
-		if err := c.parent.RegisterCharacter(c); err != nil {
-			return err
-		}
-
+		return c.handleEnterWorld(p)
 	case op == "OP_ZoneServerInfo":
-		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
-		zi := &eqStruct.ZoneServerInfo{}
-		if err := zi.Unmarshal(p.packet.Payload); err != nil {
-			return err
-		}
-
-		slog.Debug("zoning event detected", "client", c.id)
-		Key := fmt.Sprintf("%s:%d", zi.IP, zi.Port)
-		fKey, rKey := "dst-"+Key, "src-"+Key
-		c.parent.mu.Lock()
-		c.parent.predicted[fKey] = NewPredict(c, ST_ZONE, assembler.DirClientToServer)
-		c.parent.predicted[rKey] = NewPredict(c, ST_ZONE, assembler.DirServerToClient)
-		c.parent.mu.Unlock()
-
+		return c.handleZoneServerInfo(p)
 	case op == "OP_ZoneEntry" && p.stream.dir == assembler.DirServerToClient:
-		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
-		zs := eqStruct.ServerZoneEntry{}
-		if err := zs.Unmarshal(p.packet.Payload); err != nil {
-			return err
-		}
-
-		if c.matchChar(zs.Name) {
-			return nil
-		}
-
-		if err := c.parent.RegisterCharacter(c); err != nil {
-			return err
-		}
-
+		return c.handleZoneEntry(p)
+	case op == "OP_MobUpdate":
+		return c.handleMobUpdate(p)
+	case op == "OP_ZoneSpawns":
+		return c.handleZoneSpawns(p)
 	case op == "OP_SendLoginInfo":
-		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
-		li := eqStruct.LoginInfo{}
-		if err := li.Unmarshal(p.packet.Payload); err != nil {
-			return err
-		}
-
-		if c.matchAcct(li.Account) {
-			return nil
-		}
-
-		c.clientSessionID = li.Account
-		if err := c.parent.RegisterAcct(c); err != nil {
-			return err
-		}
-
+		return c.handleSendLoginInfo(p)
 	case op == "OP_LoginAccepted":
-		slog.Debug("game track", "opCode", op, "dir", p.stream.dir.String())
-		li := eqStruct.LoginAccepted{}
-		if err := li.Unmarshal(p.packet.Payload); err != nil {
-			return err
-		}
-
-		if c.matchAcct(li.Account) {
-			return nil
-		}
-
-		c.clientSessionID = li.Account
-		if err := c.parent.RegisterAcct(c); err != nil {
-			return err
-		}
-
+		return c.handleLoginAccept(p)
+	case op == "OP_ClientUpdate":
+		return c.handleClientUpdate(p)
+	case op == "OP_ManaUpdate":
+		return c.handleManaUpdate(p)
+	case op == "OP_NewZone":
+		return c.handleNewZone(p)
 	}
 
 	return nil
@@ -400,6 +316,7 @@ func (gw *gameClientWatch) RegisterCharacter(c *gameClient) error {
 	}
 
 	gw.charMap[c.clientCharacter] = c
+
 	return nil
 }
 
@@ -444,6 +361,7 @@ func (c *gameClient) matchAcct(n string) bool {
 func (c *gameClient) reduce(gc *gameClient) {
 	gc.mu.Lock()
 	c.mu.Lock()
+
 	for _, s := range c.streams {
 		s.gameClient = gc
 		gc.streams[s.key] = s
@@ -458,7 +376,7 @@ func (c *gameClient) reduce(gc *gameClient) {
 	gc.mu.Unlock()
 }
 
-func (c *gameClientWatch) Run(p StreamPacket) error {
+func (c *gameClientWatch) Run(p *StreamPacket) error {
 	if c.Check(p) {
 		slog.Debug("success matching unknown flow", "stream", p.stream.key.String())
 		if err := p.stream.gameClient.Run(p); err != nil {
@@ -466,30 +384,36 @@ func (c *gameClientWatch) Run(p StreamPacket) error {
 		}
 		return nil
 	}
+
 	c.Check(p)
 	if p.stream.sType == ST_UNKNOWN {
 		p.stream.Identify(p.packet)
 	}
+
 	if c.Check(p) {
 		slog.Debug("fallback matching unknown flow", "stream", p.stream.key.String())
 		if err := p.stream.gameClient.Run(p); err != nil {
 			return err
 		}
 	}
+
 	switch p.stream.sType {
 	case ST_WORLD, ST_LOGIN: // Wait for a zone event at minimum.
 		c.newPredictClient(p)
 		return p.stream.gameClient.Run(p)
 	}
+
 	return nil
 }
 
 func (c *gameClientWatch) getFirstClient() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	for k := range c.clients {
 		return k.String()
 	}
+
 	return ""
 }
 
@@ -537,4 +461,207 @@ func (c *gameClient) PingChan() chan struct{} {
 	p := c.ping
 	c.mu.RUnlock()
 	return p
+}
+
+func (c *gameClient) handlePlayEQ(p *StreamPacket) error {
+	ply := &eqStruct.PlayRequest{}
+	if err := ply.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+	p.Obj = ply
+
+	Key := fmt.Sprintf("%s:%d", ply.IP, 9000)
+	fKey, rKey := "dst-"+Key, "src-"+Key
+
+	c.parent.mu.Lock()
+	c.parent.predicted[fKey] = NewPredict(c, ST_WORLD, assembler.DirClientToServer)
+	c.parent.predicted[rKey] = NewPredict(c, ST_WORLD, assembler.DirServerToClient)
+	c.parent.mu.Unlock()
+
+	return nil
+}
+
+func (c *gameClient) handleLogServer(p *StreamPacket) error {
+	ls := &eqStruct.LogServer{}
+	if err := ls.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+	p.Obj = ls
+
+	if c.clientServer == "" {
+		c.clientServer = ls.ShortName
+	}
+
+	return nil
+}
+
+func (c *gameClient) handlePlayerProfile(p *StreamPacket) error {
+	ls := &eqStruct.PlayerProfile{}
+	if err := ls.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+
+	p.Obj = ls
+	c.PlayerProfile = ls
+
+	return nil
+}
+
+func (c *gameClient) handleEnterWorld(p *StreamPacket) error {
+	ew := &eqStruct.EnterWorld{}
+	if err := ew.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+
+	p.Obj = ew
+
+	if c.matchChar(ew.Name) {
+		return nil
+	}
+
+	if c.clientCharacter == "" {
+		c.clientCharacter = ew.Name
+	}
+
+	if c.matchChar(ew.Name) {
+		return nil
+	}
+
+	if err := c.parent.RegisterCharacter(c); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *gameClient) handleZoneServerInfo(p *StreamPacket) error {
+	s := &eqStruct.ZoneServerInfo{}
+	if err := s.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+	p.Obj = s
+
+	slog.Debug("zoning event detected", "client", c.id)
+	Key := fmt.Sprintf("%s:%d", s.IP, s.Port)
+	fKey, rKey := "dst-"+Key, "src-"+Key
+
+	c.parent.mu.Lock()
+	c.parent.predicted[fKey] = NewPredict(c, ST_ZONE, assembler.DirClientToServer)
+	c.parent.predicted[rKey] = NewPredict(c, ST_ZONE, assembler.DirServerToClient)
+	c.parent.mu.Unlock()
+
+	return nil
+}
+
+func (c *gameClient) handleZoneEntry(p *StreamPacket) error {
+	s := &eqStruct.ServerZoneEntry{}
+	if err := s.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+	p.Obj = s
+
+	if c.matchChar(s.Name) {
+		return nil
+	}
+
+	if err := c.parent.RegisterCharacter(c); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *gameClient) handleMobUpdate(p *StreamPacket) error {
+	s := &eqStruct.SpawnPositionUpdates{}
+	if err := s.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+
+	p.Obj = s
+
+	return nil
+}
+
+func (c *gameClient) handleZoneSpawns(p *StreamPacket) error {
+	s := &eqStruct.ZoneSpawns{}
+	if err := s.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+
+	p.Obj = s
+
+	return nil
+}
+
+func (c *gameClient) handleSendLoginInfo(p *StreamPacket) error {
+	li := &eqStruct.LoginInfo{}
+	if err := li.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+
+	p.Obj = li
+
+	if c.matchAcct(li.Account) {
+		return nil
+	}
+
+	c.clientSessionID = li.Account
+	if err := c.parent.RegisterAcct(c); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *gameClient) handleLoginAccept(p *StreamPacket) error {
+	li := &eqStruct.LoginAccepted{}
+	if err := li.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+
+	p.Obj = li
+
+	if c.matchAcct(li.Account) {
+		return nil
+	}
+
+	c.clientSessionID = li.Account
+	if err := c.parent.RegisterAcct(c); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *gameClient) handleClientUpdate(p *StreamPacket) error {
+	cu := &eqStruct.SpawnPositionUpdate{}
+	if err := cu.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+
+	p.Obj = cu
+
+	return nil
+}
+
+func (c *gameClient) handleManaUpdate(p *StreamPacket) error {
+	s := &eqStruct.ManaUpdate{}
+	if err := s.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+
+	p.Obj = s
+
+	return nil
+}
+
+func (c *gameClient) handleNewZone(p *StreamPacket) error {
+	s := &eqStruct.NewZone{}
+	if err := s.Unmarshal(p.packet.Payload); err != nil {
+		return err
+	}
+
+	p.Obj = s
+
+	return nil
 }

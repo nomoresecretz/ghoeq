@@ -11,11 +11,13 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/peer"
 
-	"github.com/nomoresecretz/ghoeq/common/decoder"
+	"github.com/nomoresecretz/ghoeq-common/decoder"
+	"github.com/nomoresecretz/ghoeq-common/eqStruct"
+	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 	"github.com/nomoresecretz/ghoeq/common/eqOldPacket"
-	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
 	"github.com/nomoresecretz/ghoeq/common/ringbuffer"
 	"github.com/nomoresecretz/ghoeq/server/assembler"
+	timepb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var now = func() time.Time {
@@ -89,14 +91,17 @@ const (
 )
 
 type StreamPacket struct {
+	origin time.Time
 	stream *stream
 	packet *eqOldPacket.EQApplication
 	seq    uint64
 	opCode decoder.OpCode
+	Obj    eqStruct.EQStruct
 }
 
 func (s *StreamPacket) Proto() *pb.APPacket {
 	return &pb.APPacket{
+		Origin:   timepb.New(s.origin),
 		Seq:      s.seq,
 		OpCode:   uint32(s.opCode),
 		Data:     s.packet.Payload,
@@ -187,8 +192,6 @@ func (s *stream) FanOut(ctx context.Context, p StreamPacket) error {
 }
 
 func (s *stream) Process(ctx context.Context, p StreamPacket) error {
-	s.rb.Add(p) // TODO: store the sequence numbers somehow.
-
 	select {
 	case <-ctx.Done():
 	case s.sf.cout <- p:
@@ -230,9 +233,11 @@ func (s *stream) Identify(p *eqOldPacket.EQApplication) {
 		s.sType = ST_ZONE
 	}
 
-	if s.sType == ST_ZONE {
-		time.Sleep(time.Second) // Lets hold a moment and see if the predict comes in.
-	}
+	/*
+		if s.sType == ST_ZONE {
+			time.Sleep(time.Second) // Lets hold a moment and see if the predict comes in.
+		}
+	*/
 
 	if s.sType != ST_UNKNOWN {
 		slog.Info("identified stream type", "stream", s.key.String(), "type", s.sType.String(), "direction", s.dir.String(), "packet", p.OpCode)

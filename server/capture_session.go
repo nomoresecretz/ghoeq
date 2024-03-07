@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nomoresecretz/ghoeq/common/decoder"
+	"github.com/nomoresecretz/ghoeq-common/decoder"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/peer"
 
-	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
+	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 )
 
 const (
@@ -34,6 +34,7 @@ type session struct {
 	mgr        *sessionMgr
 	clients    map[uuid.UUID]*sessionClient
 	clientChan chan<- StreamPacket
+	onceClose  sync.Once
 }
 
 type sessionClient struct {
@@ -93,7 +94,7 @@ func (s *session) Run(ctx context.Context, src string) error {
 		return s.processPackets(wctx, apc)
 	})
 	wg.Go(func() error {
-		return s.handleClients(wctx, apcb, sm)
+		return s.handleClients(wctx, apcb)
 	})
 
 	return wg.Wait()
@@ -102,7 +103,13 @@ func (s *session) Run(ctx context.Context, src string) error {
 // Close closes the underlying source, causing a chain of graceful closures up the handler stack, ultimately gracefully ending the session. Non Blocking.
 func (s *session) Close() {
 	s.handle.Close()
-	close(s.clientChan)
+	s.onceClose.Do(func() {
+		if s.clientChan == nil {
+			s.closeClients()
+			return
+		}
+		close(s.clientChan)
+	})
 }
 
 /*
@@ -184,11 +191,13 @@ func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter)
 	}
 
 	if p.stream.gameClient != nil {
-		p.stream.gameClient.Run(p)
+		p.stream.gameClient.Run(&p)
 	} else {
-		s.sm.clientWatch.Run(p)
+		s.sm.clientWatch.Run(&p)
 	}
 
+	p.stream.rb.Add(p)
+	
 	if err := s.clientSend(ctx, p); err != nil {
 		return err
 	}
@@ -201,23 +210,14 @@ func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter)
 }
 
 // handleClients runs the fanout loop for client sessions.
-func (s *session) handleClients(ctx context.Context, apcb <-chan StreamPacket, sm *streamMgr) error {
+func (s *session) handleClients(ctx context.Context, apcb <-chan StreamPacket) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case p, ok := <-apcb:
 			if !ok {
-				s.mu.RLock()
-				for _, sc := range s.clients {
-					if sc.handle == nil {
-						continue
-					}
-
-					close(sc.handle)
-					sc.handle = nil
-				}
-				s.mu.RUnlock()
+				s.closeClients()
 
 				return nil // chan closure
 			}
@@ -229,6 +229,19 @@ func (s *session) handleClients(ctx context.Context, apcb <-chan StreamPacket, s
 			s.mu.RUnlock()
 		}
 	}
+}
+
+func (s *session) closeClients() {
+	s.mu.RLock()
+	for _, sc := range s.clients {
+		if sc.handle == nil {
+			continue
+		}
+
+		close(sc.handle)
+		sc.handle = nil
+	}
+	s.mu.RUnlock()
 }
 
 // Send relays the packet to the attached client session.

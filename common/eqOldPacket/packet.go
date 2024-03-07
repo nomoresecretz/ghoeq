@@ -12,13 +12,13 @@ import (
 // Create custom layer structure
 type OldEQOuter struct {
 	Flags      OldFlags
-	Seq      uint16
-	ARSP     uint16
-	ARQ      uint16
+	Seq        uint16
+	ARSP       uint16
+	ARQ        uint16
 	FragHeader FragHeader
 	AsqHigh    uint8
 	AsqLow     uint8
-	OpCode   []byte
+	OpCode     []byte
 	Payload    []byte
 	CRC        uint32
 }

@@ -57,7 +57,7 @@ func (dir FlowDirection) Reverse() FlowDirection {
 	case DirServerToClient:
 		return DirClientToServer
 	}
-	
+
 	return dir
 }
 
@@ -118,6 +118,7 @@ func (c *connection) Clean() {
 	defer c.mu.Unlock()
 
 	c.closed = true
+	stream := c.stream
 	c.stream = nil
-	c.stream.Clean()
+	stream.Clean()
 }

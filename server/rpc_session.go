@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
+	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 )
 
 func (s *ghoeqServer) handleSessionRequest(ctx context.Context, r *pb.ModifyRequest) error {
@@ -35,7 +35,7 @@ func (s *ghoeqServer) handleSessionStartRequest(ctx context.Context, r *pb.Modif
 	if src == "" || !s.validSource(src) {
 		return "", fmt.Errorf("a valid source is required")
 	}
-	
+
 	return s.startCapture(ctx, src)
 }
 

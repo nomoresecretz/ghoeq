@@ -19,6 +19,7 @@ type (
 	assembler struct {
 		pool  *streamPool
 		start bool
+		watch uint16
 	}
 	Key           [2]gopacket.Flow
 	Sequence      int64
@@ -129,6 +130,7 @@ func (a *assembler) handleFrag(conn *connection, p *eqOldPacket.OldEQOuter, t ti
 			frags:  make([]fragment, ttl),
 			seen:   0,
 		}
+		conn.frags[id] = frag
 	}
 
 	if frag.frags[me].payload == nil {

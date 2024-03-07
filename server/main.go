@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	pb "github.com/nomoresecretz/ghoeq/common/proto/ghoeq"
+	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 )
 
 var (
