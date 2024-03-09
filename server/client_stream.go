@@ -156,8 +156,14 @@ func (sf *streamFactory) Close() {
 }
 
 func (s *stream) Clean() {
-	// TODO: clean up dead stream.
-	panic("unimplemented")
+	s.mu.Lock()
+	if s.gameClient != nil {
+		s.gameClient.mu.Lock()
+		delete(s.gameClient.streams, s.key)
+		s.gameClient.mu.Unlock()
+	}
+	s.Close()
+	s.mu.Unlock()
 }
 
 func (s *stream) Proto() *pb.Stream {

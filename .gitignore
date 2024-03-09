@@ -32,3 +32,6 @@ go.work.sum
 # VScode stuff
 .vscode/
 *.code-workspace
+
+#slog output
+debug.log
