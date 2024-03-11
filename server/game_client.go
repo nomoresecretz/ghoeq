@@ -96,8 +96,10 @@ func (c *gameClient) AddStream(s *stream) {
 }
 
 func (c *gameClient) LockedPing() {
-	close(c.ping)
+	ping := c.ping
 	c.ping = make(chan struct{})
+
+	close(ping)
 }
 
 func (c *gameClientWatch) CheckFull(p *StreamPacket, pr predictEntry, b bool) bool {
@@ -289,6 +291,12 @@ func (c *gameClient) Run(p *StreamPacket) error {
 		return handleOpCode(&eqStruct.Damage{}, p)
 	case op == "OP_ExpUpdate":
 		return handleOpCode(&eqStruct.ExpUpdate{}, p)
+	case op == "OP_Consider":
+		return handleOpCode(&eqStruct.Consider{}, p)
+	case op == "OP_TargetMouse":
+		return handleOpCode(&eqStruct.Target{}, p)
+	case op == "OP_HPUpdate":
+		return handleOpCode(&eqStruct.HPUpdate{}, p)
 	default:
 		slog.Info("unhandled type: ", "type", op, "dir", p.stream.dir)
 	}
@@ -395,6 +403,7 @@ func (c *gameClient) reduce(gc *gameClient) {
 func (c *gameClientWatch) Run(p *StreamPacket) error {
 	if c.Check(p) {
 		slog.Debug("success matching unknown flow", "stream", p.stream.key.String())
+
 		if err := p.stream.gameClient.Run(p); err != nil {
 			return err
 		}
@@ -402,12 +411,14 @@ func (c *gameClientWatch) Run(p *StreamPacket) error {
 	}
 
 	c.Check(p)
+
 	if p.stream.sType == ST_UNKNOWN {
 		p.stream.Identify(p.packet)
 	}
 
 	if c.Check(p) {
 		slog.Debug("fallback matching unknown flow", "stream", p.stream.key.String())
+
 		if err := p.stream.gameClient.Run(p); err != nil {
 			return err
 		}
@@ -448,6 +459,7 @@ func (c *gameClientWatch) WaitForClient(ctx context.Context, id string) (*gameCl
 				return nil, ctx.Err()
 			case <-p:
 			}
+
 			id = c.getFirstClient()
 		case 1:
 			id = c.getFirstClient()
@@ -481,10 +493,9 @@ func (c *gameClient) PingChan() chan struct{} {
 
 func (c *gameClient) handlePlayEQ(p *StreamPacket) error {
 	ply := &eqStruct.PlayRequest{}
-	if err := ply.Unmarshal(p.packet.Payload); err != nil {
+	if err := handleOpCode(ply, p); err != nil {
 		return err
 	}
-	p.Obj = ply
 
 	Key := fmt.Sprintf("%s:%d", ply.IP, 9000)
 	fKey, rKey := "dst-"+Key, "src-"+Key
@@ -499,10 +510,9 @@ func (c *gameClient) handlePlayEQ(p *StreamPacket) error {
 
 func (c *gameClient) handleLogServer(p *StreamPacket) error {
 	ls := &eqStruct.LogServer{}
-	if err := ls.Unmarshal(p.packet.Payload); err != nil {
+	if err := handleOpCode(ls, p); err != nil {
 		return err
 	}
-	p.Obj = ls
 
 	if c.clientServer == "" {
 		c.clientServer = ls.ShortName
@@ -513,11 +523,9 @@ func (c *gameClient) handleLogServer(p *StreamPacket) error {
 
 func (c *gameClient) handleEnterWorld(p *StreamPacket) error {
 	ew := &eqStruct.EnterWorld{}
-	if err := ew.Unmarshal(p.packet.Payload); err != nil {
+	if err := handleOpCode(ew, p); err != nil {
 		return err
 	}
-
-	p.Obj = ew
 
 	if c.matchChar(ew.Name) {
 		return nil
@@ -540,12 +548,12 @@ func (c *gameClient) handleEnterWorld(p *StreamPacket) error {
 
 func (c *gameClient) handleZoneServerInfo(p *StreamPacket) error {
 	s := &eqStruct.ZoneServerInfo{}
-	if err := s.Unmarshal(p.packet.Payload); err != nil {
+	if err := handleOpCode(s, p); err != nil {
 		return err
 	}
-	p.Obj = s
 
 	slog.Debug("zoning event detected", "client", c.id)
+
 	Key := fmt.Sprintf("%s:%d", s.IP, s.Port)
 	fKey, rKey := "dst-"+Key, "src-"+Key
 
@@ -559,10 +567,9 @@ func (c *gameClient) handleZoneServerInfo(p *StreamPacket) error {
 
 func (c *gameClient) handleZoneEntry(p *StreamPacket) error {
 	s := &eqStruct.ServerZoneEntry{}
-	if err := s.Unmarshal(p.packet.Payload); err != nil {
+	if err := handleOpCode(s, p); err != nil {
 		return err
 	}
-	p.Obj = s
 
 	if c.matchChar(s.Name) {
 		return nil
@@ -577,11 +584,9 @@ func (c *gameClient) handleZoneEntry(p *StreamPacket) error {
 
 func (c *gameClient) handleSendLoginInfo(p *StreamPacket) error {
 	li := &eqStruct.LoginInfo{}
-	if err := li.Unmarshal(p.packet.Payload); err != nil {
+	if err := handleOpCode(li, p); err != nil {
 		return err
 	}
-
-	p.Obj = li
 
 	if c.matchAcct(li.Account) {
 		return nil
@@ -597,11 +602,9 @@ func (c *gameClient) handleSendLoginInfo(p *StreamPacket) error {
 
 func (c *gameClient) handleLoginAccept(p *StreamPacket) error {
 	li := &eqStruct.LoginAccepted{}
-	if err := li.Unmarshal(p.packet.Payload); err != nil {
+	if err := handleOpCode(li, p); err != nil {
 		return err
 	}
-
-	p.Obj = li
 
 	if c.matchAcct(li.Account) {
 		return nil
@@ -609,7 +612,7 @@ func (c *gameClient) handleLoginAccept(p *StreamPacket) error {
 
 	c.clientSessionID = li.Account
 	if err := c.parent.RegisterAcct(c); err != nil {
-		return err
+		return fmt.Errorf("failed to register acct: %w", err)
 	}
 
 	return nil
@@ -617,7 +620,8 @@ func (c *gameClient) handleLoginAccept(p *StreamPacket) error {
 
 func handleOpCode[T eqStruct.EQStruct](s T, p *StreamPacket) error {
 	if err := s.Unmarshal(p.packet.Payload); err != nil {
-		return err
+		slog.Error("failed unmarshaling", "error", err, "struct", s)
+		return fmt.Errorf("failed to unmarshal %T: %w", s, err)
 	}
 
 	p.Obj = s

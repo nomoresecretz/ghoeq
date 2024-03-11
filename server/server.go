@@ -256,17 +256,17 @@ func (s *ghoeqServer) AttachStreamStruct(r *pb.AttachStreamRequest, stream pb.Ba
 
 	ses, err := s.getSession(r.GetSessionId())
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to find session: %w", err)
 	}
 
 	str, err := ses.sm.StreamById(r.GetId())
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to get stream by id: %w", err)
 	}
 
 	cStream, err := str.AttachToStream(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to attach to stream: %w", err)
 	}
 
 	slog.Debug("client added a stream watch")
@@ -283,7 +283,7 @@ func (s *ghoeqServer) AttachStreamStruct(r *pb.AttachStreamRequest, stream pb.Ba
 
 		outP, err := makeOutStructPacket(p)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to make struct packet: %w", err)
 		}
 
 		if err := stream.Send(outP); err != nil {
@@ -397,7 +397,7 @@ func (s *ghoeqServer) GracefulStop() {
 func makeOutStructPacket(p StreamPacket) (*pb.ClientPacket, error) {
 	eqstr, err := getMsg(p)
 	if err != nil {
-		return nil, err
+		slog.Error("message failure: %w", err, "packet", p)
 	}
 
 	outP := &pb.ClientPacket{
@@ -406,6 +406,11 @@ func makeOutStructPacket(p StreamPacket) (*pb.ClientPacket, error) {
 		OpCode: uint32(p.opCode),
 		Struct: eqstr,
 	}
+
+	if *debugFlag {
+		outP.Data = p.packet.Payload
+	}
+
 	if eqstr == nil {
 		outP.Data = p.packet.Payload
 	}
@@ -430,7 +435,7 @@ func getMsg(p StreamPacket) (*structPb.DataStruct, error) {
 
 	anyMsg, err := anypb.New(msg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("anymsg conversion err: %w", err)
 	}
 
 	return &structPb.DataStruct{
