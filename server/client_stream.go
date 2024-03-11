@@ -170,7 +170,7 @@ func (s *stream) Proto() *pb.Stream {
 	return &pb.Stream{
 		Id:          s.key.String(),
 		Address:     s.net.Src().String(),
-		Port:        s.port.String(),
+		Port:        s.port.Src().String(),
 		PeerAddress: s.net.Dst().String(),
 		PeerPort:    s.port.Dst().String(),
 		Type:        pb.PeerType(s.sType),
