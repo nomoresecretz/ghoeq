@@ -239,11 +239,9 @@ func (s *stream) Identify(p *eqOldPacket.EQApplication) {
 		s.sType = ST_ZONE
 	}
 
-	/*
-		if s.sType == ST_ZONE {
-			time.Sleep(time.Second) // Lets hold a moment and see if the predict comes in.
-		}
-	*/
+	if s.sType == ST_ZONE {
+		time.Sleep(time.Second) // Lets hold a moment and see if the predict comes in.
+	}
 
 	if s.sType != ST_UNKNOWN {
 		slog.Info("identified stream type", "stream", s.key.String(), "type", s.sType.String(), "direction", s.dir.String(), "packet", p.OpCode)
