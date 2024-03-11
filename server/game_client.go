@@ -254,7 +254,7 @@ func (c *gameClient) Run(p *StreamPacket) error {
 	case op == "OP_LogServer" && p.stream.dir == assembler.DirServerToClient:
 		return c.handleLogServer(p)
 	case op == "OP_PlayerProfile" && p.stream.dir == assembler.DirServerToClient:
-		return c.handlePlayerProfile(p)
+		return handleOpCode(&eqStruct.PlayerProfile{}, p)
 	case op == "OP_EnterWorld":
 		return c.handleEnterWorld(p)
 	case op == "OP_ZoneServerInfo":
@@ -262,19 +262,35 @@ func (c *gameClient) Run(p *StreamPacket) error {
 	case op == "OP_ZoneEntry" && p.stream.dir == assembler.DirServerToClient:
 		return c.handleZoneEntry(p)
 	case op == "OP_MobUpdate":
-		return c.handleMobUpdate(p)
+		return handleOpCode(&eqStruct.SpawnPositionUpdates{}, p)
 	case op == "OP_ZoneSpawns":
-		return c.handleZoneSpawns(p)
+		return handleOpCode(&eqStruct.ZoneSpawns{}, p)
 	case op == "OP_SendLoginInfo":
 		return c.handleSendLoginInfo(p)
 	case op == "OP_LoginAccepted":
 		return c.handleLoginAccept(p)
 	case op == "OP_ClientUpdate":
-		return c.handleClientUpdate(p)
+		return handleOpCode(&eqStruct.SpawnPositionUpdate{}, p)
 	case op == "OP_ManaUpdate":
-		return c.handleManaUpdate(p)
+		return handleOpCode(&eqStruct.ManaUpdate{}, p)
 	case op == "OP_NewZone":
-		return c.handleNewZone(p)
+		return handleOpCode(&eqStruct.NewZone{}, p)
+	case op == "OP_Stamina":
+		return handleOpCode(&eqStruct.StaminaUpdate{}, p)
+	case op == "OP_SpawnAppearance":
+		return handleOpCode(&eqStruct.SpawnAppearance{}, p)
+	case op == "OP_MoveDoor":
+		return handleOpCode(&eqStruct.MoveDoor{}, p)
+	case op == "OP_Action":
+		return handleOpCode(&eqStruct.Action{}, p)
+	case op == "OP_BeginCast":
+		return handleOpCode(&eqStruct.BeginCast{}, p)
+	case op == "OP_Damage":
+		return handleOpCode(&eqStruct.Damage{}, p)
+	case op == "OP_ExpUpdate":
+		return handleOpCode(&eqStruct.ExpUpdate{}, p)
+	default:
+		slog.Info("unhandled type: ", "type", op, "dir", p.stream.dir)
 	}
 
 	return nil
@@ -495,18 +511,6 @@ func (c *gameClient) handleLogServer(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handlePlayerProfile(p *StreamPacket) error {
-	ls := &eqStruct.PlayerProfile{}
-	if err := ls.Unmarshal(p.packet.Payload); err != nil {
-		return err
-	}
-
-	p.Obj = ls
-	c.PlayerProfile = ls
-
-	return nil
-}
-
 func (c *gameClient) handleEnterWorld(p *StreamPacket) error {
 	ew := &eqStruct.EnterWorld{}
 	if err := ew.Unmarshal(p.packet.Payload); err != nil {
@@ -571,28 +575,6 @@ func (c *gameClient) handleZoneEntry(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handleMobUpdate(p *StreamPacket) error {
-	s := &eqStruct.SpawnPositionUpdates{}
-	if err := s.Unmarshal(p.packet.Payload); err != nil {
-		return err
-	}
-
-	p.Obj = s
-
-	return nil
-}
-
-func (c *gameClient) handleZoneSpawns(p *StreamPacket) error {
-	s := &eqStruct.ZoneSpawns{}
-	if err := s.Unmarshal(p.packet.Payload); err != nil {
-		return err
-	}
-
-	p.Obj = s
-
-	return nil
-}
-
 func (c *gameClient) handleSendLoginInfo(p *StreamPacket) error {
 	li := &eqStruct.LoginInfo{}
 	if err := li.Unmarshal(p.packet.Payload); err != nil {
@@ -633,30 +615,7 @@ func (c *gameClient) handleLoginAccept(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handleClientUpdate(p *StreamPacket) error {
-	cu := &eqStruct.SpawnPositionUpdate{}
-	if err := cu.Unmarshal(p.packet.Payload); err != nil {
-		return err
-	}
-
-	p.Obj = cu
-
-	return nil
-}
-
-func (c *gameClient) handleManaUpdate(p *StreamPacket) error {
-	s := &eqStruct.ManaUpdate{}
-	if err := s.Unmarshal(p.packet.Payload); err != nil {
-		return err
-	}
-
-	p.Obj = s
-
-	return nil
-}
-
-func (c *gameClient) handleNewZone(p *StreamPacket) error {
-	s := &eqStruct.NewZone{}
+func handleOpCode[T eqStruct.EQStruct](s T, p *StreamPacket) error {
 	if err := s.Unmarshal(p.packet.Payload); err != nil {
 		return err
 	}
