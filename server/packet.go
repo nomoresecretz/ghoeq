@@ -1,7 +1,9 @@
-package main
+package server
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gopacket/gopacket"
@@ -64,13 +66,24 @@ func liveHandle(d string) (*pcap.Handle, error) {
 	return h.Activate()
 }
 
-/*
 func fileHandle(f string) (*pcap.Handle, error) {
 	return pcap.OpenOffline(f)
 }
-*/
 
 // GetSources returns the list of captureable interfaces.
 func GetSources() ([]pcap.Interface, error) {
 	return pcap.FindAllDevs()
+}
+
+func getHandle(src string) (*pcap.Handle, error) {
+	if file, present := strings.CutPrefix(src, "file://"); present {
+		return fileHandle(file)
+	}
+
+	h, err := liveHandle(src) // TODO: Support other kinds of captures here.
+	if err != nil {
+		return nil, fmt.Errorf("failed to open live handle: %w", err)
+	}
+
+	return h, nil
 }

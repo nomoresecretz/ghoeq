@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -20,9 +20,10 @@ type ghoeqServer struct {
 
 	sMgr *sessionMgr
 	pb.UnimplementedBackendServerServer
+	debugFlag bool
 }
 
-func NewGhoeqServer(ctx context.Context) (*ghoeqServer, error) {
+func New(ctx context.Context, cDev []string) (*ghoeqServer, error) {
 	allowedDev := make(map[string]struct{})
 
 	for _, d := range cDev {
@@ -44,12 +45,12 @@ func (s *ghoeqServer) validSource(src string) bool {
 	return v || len(s.allowedDev) == 0
 }
 
-func (s *ghoeqServer) Go(ctx context.Context) error {
+func (s *ghoeqServer) Run(ctx context.Context, d opDecoder) error {
 	g, wctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		s.sMgr = NewSessionManager()
 
-		return s.sMgr.Go(wctx, s)
+		return s.sMgr.Go(wctx, s, d)
 	})
 
 	return g.Wait()
@@ -119,7 +120,7 @@ func (s *ghoeqServer) ListStreams(ctx context.Context, r *pb.ListStreamRequest) 
 
 func (s *ghoeqServer) ModifySession(ctx context.Context, r *pb.ModifySessionRequest) (*pb.SessionResponse, error) {
 	for _, m := range r.Mods {
-		if err := s.handleSessionRequest(ctx, m); err != nil {
+		if err := s.handleSessionRequest(m); err != nil {
 			return nil, err
 		}
 	}
@@ -281,7 +282,7 @@ func (s *ghoeqServer) AttachStreamStruct(r *pb.AttachStreamRequest, stream pb.Ba
 	for _, p := range op {
 		seen[p.seq] = struct{}{}
 
-		outP, err := makeOutStructPacket(p)
+		outP, err := s.makeOutStructPacket(p)
 		if err != nil {
 			return fmt.Errorf("failed to make struct packet: %w", err)
 		}
@@ -376,7 +377,7 @@ func (s *ghoeqServer) sendLoopStruct(ctx context.Context, handle <-chan StreamPa
 				delete(seen, p.seq-100)
 			}
 
-			outP, err := makeOutStructPacket(p)
+			outP, err := s.makeOutStructPacket(p)
 			if err != nil {
 				return err
 			}
@@ -394,7 +395,7 @@ func (s *ghoeqServer) GracefulStop() {
 	s.sMgr.GracefulStop()
 }
 
-func makeOutStructPacket(p StreamPacket) (*pb.ClientPacket, error) {
+func (s *ghoeqServer) makeOutStructPacket(p StreamPacket) (*pb.ClientPacket, error) {
 	eqstr, err := getMsg(p)
 	if err != nil {
 		slog.Error("message failure: %w", err, "packet", p)
@@ -407,7 +408,7 @@ func makeOutStructPacket(p StreamPacket) (*pb.ClientPacket, error) {
 		Struct: eqstr,
 	}
 
-	if *debugFlag {
+	if s.debugFlag {
 		outP.Data = p.packet.Payload
 	}
 

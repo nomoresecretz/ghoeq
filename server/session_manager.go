@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -42,19 +42,19 @@ func (s *sessionMgr) genSessionID() uuid.UUID {
 }
 
 // Go manages goroutine lifetime for the sessions and message brokers.
-func (sm *sessionMgr) Go(ctx context.Context, gs *ghoeqServer) error {
+func (sm *sessionMgr) Go(ctx context.Context, gs *ghoeqServer, d opDecoder) error {
 	sm.parent = gs
 
 	g, wctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		return sm.requestHandler(wctx)
+		return sm.requestHandler(wctx, d)
 	})
 
 	return g.Wait()
 }
 
 // requestHandler runs the handler loop to manage capture sessions.
-func (s *sessionMgr) requestHandler(ctx context.Context) error {
+func (s *sessionMgr) requestHandler(ctx context.Context, d opDecoder) error {
 	g, wctx := errgroup.WithContext(ctx)
 	sc := make(chan *sessionRequest)
 	s.ctrlChan = sc
@@ -69,7 +69,7 @@ func (s *sessionMgr) requestHandler(ctx context.Context) error {
 				break
 			}
 
-			if err := s.handleRequest(wctx, r, g); err != nil {
+			if err := s.handleRequest(wctx, d, r, g); err != nil {
 				return err
 			}
 		}
@@ -78,12 +78,12 @@ func (s *sessionMgr) requestHandler(ctx context.Context) error {
 	return g.Wait()
 }
 
-func (sm *sessionMgr) handleRequest(ctx context.Context, r *sessionRequest, g *errgroup.Group) error {
+func (sm *sessionMgr) handleRequest(ctx context.Context, d opDecoder, r *sessionRequest, g *errgroup.Group) error {
 	switch r.mode {
 	case "Start":
 		// TODO: add duplicate checking
 		g.Go(func() error {
-			return sm.runCapture(ctx, r.src, r.replyChan) // TODO: test capture first so we can return error to client instead of killing server. :)
+			return sm.runCapture(ctx, d, r.src, r.replyChan) // TODO: test capture first so we can return error to client instead of killing server. :)
 		})
 
 		return nil
@@ -98,7 +98,7 @@ func (sm *sessionMgr) handleRequest(ctx context.Context, r *sessionRequest, g *e
 }
 
 // runCapture does the actual work of starting a capture session and holding the work goroutines.
-func (sm *sessionMgr) runCapture(ctx context.Context, src string, c chan<- replyStruct) error {
+func (sm *sessionMgr) runCapture(ctx context.Context, d opDecoder, src string, c chan<- replyStruct) error {
 	sm.muSessions.Lock()
 	index := sm.genSessionID()
 	s := NewSession(index, src, sm)
@@ -112,7 +112,7 @@ func (sm *sessionMgr) runCapture(ctx context.Context, src string, c chan<- reply
 	close(c)
 	slog.Info("starting capture", "source", src)
 
-	return s.Run(ctx, src)
+	return s.Run(ctx, src, d)
 }
 
 // cleanSession removes the capture session from tracking and any cleanup.

@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -54,20 +54,15 @@ func NewSession(id uuid.UUID, src string, sm *sessionMgr) *session {
 }
 
 // Run does the actual capture session work, holding all goroutines for the lifetime of the capture session.
-func (s *session) Run(ctx context.Context, src string) error {
-	h, err := liveHandle(src) // TODO: Support other kinds of captures here.
+func (s *session) Run(ctx context.Context, src string, d opDecoder) error {
+	h, err := getHandle(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get capture handle: %w", err)
 	}
 
 	s.handle = h
 
 	defer h.Close()
-
-	d := decoder.NewDecoder()
-	if err := d.LoadMap(*opMap); err != nil {
-		return err
-	}
 
 	// TODO: replace this with lockless ring buffer.
 	apc := make(chan StreamPacket, procBuffer)
@@ -197,7 +192,7 @@ func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter)
 	}
 
 	p.stream.rb.Add(p)
-	
+
 	if err := s.clientSend(ctx, p); err != nil {
 		return err
 	}

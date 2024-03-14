@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"compress/zlib"
@@ -42,7 +42,7 @@ func (c *crypter) getCypher(s string) (cypher.Cypher, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s : %w", s, ErrNoCypher)
 	}
-	
+
 	return cy, nil
 }
 

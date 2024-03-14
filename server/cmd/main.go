@@ -10,16 +10,18 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/nomoresecretz/ghoeq/server"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
+	"github.com/nomoresecretz/ghoeq-common/decoder"
 	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 )
 
 var (
-	opMap    = flag.String("opFile", "", "File with opcode mappings")
-	port     = flag.Uint("port", 6420, "port to listen on for connections")
-	bindAddr = flag.String("bindAddr", "", "Network bind address")
+	opMap     = flag.String("opFile", "", "File with opcode mappings")
+	port      = flag.Uint("port", 6420, "port to listen on for connections")
+	bindAddr  = flag.String("bindAddr", "", "Network bind address")
 	debugFlag = flag.Bool("debug", false, "enable debugging")
 )
 
@@ -70,13 +72,19 @@ func doStuff(ctx context.Context) error {
 	}
 	defer l.Close()
 
+	d := decoder.NewDecoder()
+	if err := d.LoadMap(*opMap); err != nil {
+		return err
+	}
+
 	var ops []grpc.ServerOption
 	grpc := grpc.NewServer(ops...)
 
-	gs, err := NewGhoeqServer(ctx)
+	gs, err := server.New(ctx, cDev)
 	if err != nil {
 		return err
 	}
+
 	if len(cDev) == 0 {
 		sl, err := gs.ListSources(ctx, &pb.ListRequest{})
 		if err != nil {
@@ -109,8 +117,9 @@ func doStuff(ctx context.Context) error {
 			}
 		}
 	})
+
 	eg.Go(func() error {
-		return gs.Go(wctx)
+		return gs.Run(wctx, d)
 	})
 
 	eg.Go(func() error {
