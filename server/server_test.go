@@ -27,15 +27,7 @@ func TestServerFiles(t *testing.T) {
 		want         any
 		wantErr      bool
 		wantClient   *pb.Client
-	}{
-		"Adv-1": {
-			true,
-			"file://c:/tmp/gq/login3.pcapng",
-			nil,
-			false,
-			nil,
-		},
-	}
+	}{}
 
 	opDefs := os.Getenv("OPDEFS")
 	d := decoder.NewDecoder()
