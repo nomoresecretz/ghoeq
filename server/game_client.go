@@ -91,8 +91,7 @@ func (c *gameClientWatch) newClient() *gameClient {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clients[gc.id] = gc
-	close(c.ping)
-	c.ping = make(chan struct{})
+	c.LockedPing()
 
 	slog.Debug("new game client tracked", "client", gc.id)
 
@@ -108,6 +107,13 @@ func (c *gameClient) AddStream(s *stream) {
 }
 
 func (c *gameClient) LockedPing() {
+	ping := c.ping
+	c.ping = make(chan struct{})
+
+	close(ping)
+}
+
+func (c *gameClientWatch) LockedPing() {
 	ping := c.ping
 	c.ping = make(chan struct{})
 
@@ -230,8 +236,8 @@ func (gw *gameClientWatch) GracefulStop() {
 
 	gw.mu.Lock()
 	defer gw.mu.Unlock()
-	close(gw.ping)
-	gw.ping = nil
+
+	gw.ClosePing()
 }
 
 func (c *gameClientWatch) charMatch(n string) *gameClient {
@@ -250,11 +256,26 @@ func (c *gameClientWatch) charMatch(n string) *gameClient {
 func (c *gameClient) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	close(c.ping)
-	c.ping = nil
+	c.ClosePing()
 	c.parent.mu.Lock()
 	delete(c.parent.charMap, c.clientCharacter)
 	c.parent.mu.Unlock()
+}
+
+func (c *gameClientWatch) ClosePing() {
+	ping := c.ping
+	c.ping = nil
+	if ping != nil {
+		close(ping)
+	}
+}
+
+func (c *gameClient) ClosePing() {
+	ping := c.ping
+	c.ping = nil
+	if ping != nil {
+		close(ping)
+	}
 }
 
 func (c *gameClient) Run(p *StreamPacket) error {
