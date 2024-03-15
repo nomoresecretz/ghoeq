@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/pcap"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/nomoresecretz/ghoeq-common/decoder"
 	"github.com/nomoresecretz/ghoeq/common/eqOldPacket"
 	"github.com/nomoresecretz/ghoeq/server/assembler"
@@ -40,8 +40,15 @@ func NewStreamMgr(d opDecoder, cw *gameClientWatch) *streamMgr {
 	}
 }
 
+type pcapHandle interface {
+	SetBPFFilter(string) error
+	LinkType() layers.LinkType
+	gopacket.PacketDataSource
+	Close()
+}
+
 // NewCapture sets up a new capture session on an interface / source.
-func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<- StreamPacket, wg *errgroup.Group) error {
+func (sm *streamMgr) NewCapture(ctx context.Context, h pcapHandle, cout chan<- StreamPacket, wg *errgroup.Group) error {
 	if err := h.SetBPFFilter("port 9000 or port 6000 or portrange 7000-7400"); err != nil {
 		return (err)
 	}
@@ -49,7 +56,8 @@ func (sm *streamMgr) NewCapture(ctx context.Context, h *pcap.Handle, cout chan<-
 	streamFactory := NewStreamFactory(sm, cout, wg)
 	streamPool := assembler.NewStreamPool(streamFactory)
 	streamAsm := assembler.NewAssembler(streamPool)
-	defer streamFactory.Close()
+
+	defer streamPool.Close()
 
 	c := NewCapture(h)
 	pChan := c.Packets(ctx)
@@ -140,6 +148,7 @@ func (sm *streamMgr) Close() {
 	for _, s := range sm.clientStreams {
 		s.Close()
 	}
+	sm.session.Close()
 }
 
 func (sm *streamMgr) StreamById(streamId string) (*stream, error) {

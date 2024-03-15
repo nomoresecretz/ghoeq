@@ -10,6 +10,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
 	"github.com/nomoresecretz/ghoeq/common/eqOldPacket"
+	"github.com/nomoresecretz/ghoeq/server/fakePcap"
 )
 
 var (
@@ -24,7 +25,7 @@ type capture struct {
 }
 
 // NewCapture returns a capture object capable of decoding client streams.
-func NewCapture(h *pcap.Handle) *capture {
+func NewCapture(h pcapHandle) *capture {
 	layers.RegisterUDPPortLayerType(6000, eqOldPacket.OldEQOuterType)
 	layers.RegisterUDPPortLayerType(9000, eqOldPacket.OldEQOuterType)
 
@@ -66,8 +67,8 @@ func liveHandle(d string) (*pcap.Handle, error) {
 	return h.Activate()
 }
 
-func fileHandle(f string) (*pcap.Handle, error) {
-	return pcap.OpenOffline(f)
+func fileHandle(f string) (pcapHandle, error) {
+	return fakePcap.New(f)
 }
 
 // GetSources returns the list of captureable interfaces.
@@ -75,7 +76,7 @@ func GetSources() ([]pcap.Interface, error) {
 	return pcap.FindAllDevs()
 }
 
-func getHandle(src string) (*pcap.Handle, error) {
+func getHandle(src string) (pcapHandle, error) {
 	if file, present := strings.CutPrefix(src, "file://"); present {
 		return fileHandle(file)
 	}

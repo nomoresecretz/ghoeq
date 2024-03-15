@@ -52,8 +52,8 @@ func main() {
 		}
 		h := slog.New(slog.NewTextHandler(os.Stdout, opts))
 		slog.SetDefault(h)
-
 	}
+
 	err := doStuff(context.Background())
 	if err != nil {
 		slog.Error("failed to start server", "error", err)
@@ -90,10 +90,12 @@ func doStuff(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+
 		slog.Error("please allow one or more of the following capture sources:")
 		for _, s := range sl.Sources {
 			slog.Error("source", "id", s.Id, "description", s.Description)
 		}
+
 		return fmt.Errorf("no source selected")
 	}
 
@@ -119,7 +121,7 @@ func doStuff(ctx context.Context) error {
 	})
 
 	eg.Go(func() error {
-		return gs.Run(wctx, d)
+		return gs.Run(wctx, d, false)
 	})
 
 	eg.Go(func() error {

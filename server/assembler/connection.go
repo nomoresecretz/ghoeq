@@ -61,7 +61,7 @@ func (dir FlowDirection) Reverse() FlowDirection {
 	return dir
 }
 
-func (p *streamPool) newConnection(ctx context.Context, k Key, s Stream, ts time.Time) (c *connection) {
+func (p *streamPool) newConnection(ctx context.Context, k Key, s Stream) (c *connection) {
 	c = &connection{
 		frags:  make(map[uint16]*fragItem),
 		stream: s,
@@ -79,6 +79,9 @@ func (s *streamPool) cleaner(ctx context.Context, c *connection) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-s.closeChan:
+			return
 		case <-t:
 			var ret bool
 
@@ -120,5 +123,6 @@ func (c *connection) Clean() {
 	c.closed = true
 	stream := c.stream
 	c.stream = nil
+
 	stream.Clean()
 }

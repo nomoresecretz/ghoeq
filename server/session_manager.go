@@ -42,38 +42,41 @@ func (s *sessionMgr) genSessionID() uuid.UUID {
 }
 
 // Go manages goroutine lifetime for the sessions and message brokers.
-func (sm *sessionMgr) Go(ctx context.Context, gs *ghoeqServer, d opDecoder) error {
+func (sm *sessionMgr) Run(ctx context.Context, gs *ghoeqServer, d opDecoder, singleMode bool) error {
 	sm.parent = gs
 
-	g, wctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		return sm.requestHandler(wctx, d)
-	})
-
-	return g.Wait()
+	return sm.requestHandler(ctx, d, singleMode)
 }
 
 // requestHandler runs the handler loop to manage capture sessions.
-func (s *sessionMgr) requestHandler(ctx context.Context, d opDecoder) error {
+func (s *sessionMgr) requestHandler(ctx context.Context, d opDecoder, singleMode bool) error {
 	g, wctx := errgroup.WithContext(ctx)
 	sc := make(chan *sessionRequest)
 	s.ctrlChan = sc
 
 	var done bool
+
 	for !done {
 		select {
 		case <-wctx.Done():
 			done = true
 		case r, ok := <-sc:
 			if !ok {
+				done = true
 				break
 			}
 
 			if err := s.handleRequest(wctx, d, r, g); err != nil {
 				return err
 			}
+
+			if singleMode {
+				done = true
+			}
 		}
 	}
+
+	defer s.clientWatch.GracefulStop()
 
 	return g.Wait()
 }

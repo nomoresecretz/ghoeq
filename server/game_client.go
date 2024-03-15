@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,7 +15,17 @@ import (
 	"github.com/nomoresecretz/ghoeq/server/assembler"
 )
 
+const (
+	lenRaidCreate    = 72
+	lenRaidAddMember = 144
+	lenRaidGeneral   = 136
+	lenLFGAppearance = 8
+	lenLFGCommand    = 68
+)
+
 const maxPredictTime = 60 * time.Second
+
+var letterTest = regexp.MustCompile(`[a-zA-Z]`)
 
 type predictEntry struct {
 	created time.Time
@@ -248,55 +260,104 @@ func (c *gameClient) Close() {
 func (c *gameClient) Run(p *StreamPacket) error {
 	op := c.decoder.GetOp(p.opCode)
 
-	switch {
-	case op == "":
+	switch op {
+	case "":
 		slog.Debug("game client unknown opcode", "opcode", p.opCode.String())
-	case op == "OP_PlayEverquestRequest":
+	case "OP_PlayEverquestRequest":
 		return c.handlePlayEQ(p)
-	case op == "OP_LogServer" && p.stream.dir == assembler.DirServerToClient:
-		return c.handleLogServer(p)
-	case op == "OP_PlayerProfile" && p.stream.dir == assembler.DirServerToClient:
-		return handleOpCode(&eqStruct.PlayerProfile{}, p)
-	case op == "OP_EnterWorld":
+	case "OP_LogServer":
+		if p.stream.dir == assembler.DirServerToClient {
+			return c.handleLogServer(p)
+		}
+	case "OP_PlayerProfile":
+		if p.stream.dir == assembler.DirServerToClient {
+			return handleOpCode(&eqStruct.PlayerProfile{}, p)
+		}
+	case "OP_EnterWorld":
 		return c.handleEnterWorld(p)
-	case op == "OP_ZoneServerInfo":
+	case "OP_ZoneServerInfo":
 		return c.handleZoneServerInfo(p)
-	case op == "OP_ZoneEntry" && p.stream.dir == assembler.DirServerToClient:
-		return c.handleZoneEntry(p)
-	case op == "OP_MobUpdate":
+	case "OP_ZoneEntry":
+		switch p.stream.dir {
+		case assembler.DirServerToClient:
+			return c.handleZoneEntryServer(p)
+		case assembler.DirClientToServer:
+			return c.handleZoneEntryClient(p)
+		default:
+			slog.Info("unhandled type: ", "type", op, "dir", p.stream.dir)
+		}
+	case "OP_MobUpdate":
 		return handleOpCode(&eqStruct.SpawnPositionUpdates{}, p)
-	case op == "OP_ZoneSpawns":
+	case "OP_ZoneSpawns":
 		return handleOpCode(&eqStruct.ZoneSpawns{}, p)
-	case op == "OP_SendLoginInfo":
+	case "OP_SendLoginInfo":
 		return c.handleSendLoginInfo(p)
-	case op == "OP_LoginAccepted":
+	case "OP_LoginAccepted":
 		return c.handleLoginAccept(p)
-	case op == "OP_ClientUpdate":
+	case "OP_ClientUpdate":
 		return handleOpCode(&eqStruct.SpawnPositionUpdate{}, p)
-	case op == "OP_ManaUpdate":
+	case "OP_ManaUpdate":
 		return handleOpCode(&eqStruct.ManaUpdate{}, p)
-	case op == "OP_NewZone":
+	case "OP_NewZone":
 		return handleOpCode(&eqStruct.NewZone{}, p)
-	case op == "OP_Stamina":
+	case "OP_Stamina":
 		return handleOpCode(&eqStruct.StaminaUpdate{}, p)
-	case op == "OP_SpawnAppearance":
+	case "OP_SpawnAppearance":
 		return handleOpCode(&eqStruct.SpawnAppearance{}, p)
-	case op == "OP_MoveDoor":
+	case "OP_MoveDoor":
 		return handleOpCode(&eqStruct.MoveDoor{}, p)
-	case op == "OP_Action":
+	case "OP_Action":
 		return handleOpCode(&eqStruct.Action{}, p)
-	case op == "OP_BeginCast":
+	case "OP_BeginCast":
 		return handleOpCode(&eqStruct.BeginCast{}, p)
-	case op == "OP_Damage":
+	case "OP_Damage":
 		return handleOpCode(&eqStruct.Damage{}, p)
-	case op == "OP_ExpUpdate":
+	case "OP_ExpUpdate":
 		return handleOpCode(&eqStruct.ExpUpdate{}, p)
-	case op == "OP_Consider":
+	case "OP_Consider":
 		return handleOpCode(&eqStruct.Consider{}, p)
-	case op == "OP_TargetMouse":
+	case "OP_TargetMouse":
 		return handleOpCode(&eqStruct.Target{}, p)
-	case op == "OP_HPUpdate":
+	case "OP_HPUpdate":
 		return handleOpCode(&eqStruct.HPUpdate{}, p)
+	case "OP_GroundSpawn":
+		return handleOpCode(&eqStruct.Object{}, p)
+	case "OP_DeleteSpawn":
+		return handleOpCode(&eqStruct.DeleteSpawn{}, p)
+	case "OP_MOTD":
+		return handleOpCode(&eqStruct.ServerMOTD{}, p)
+	case "OP_WearChange":
+		return handleOpCode(&eqStruct.WearChange{}, p)
+	case "OP_Death":
+		return handleOpCode(&eqStruct.Death{}, p)
+	case "OP_RaidUpdate":
+		return handleRaidUpdate(p)
+	case "OP_ApproveWorld":
+		return handleOpCode(&eqStruct.WorldApprove{}, p)
+	case "OP_GuildsList":
+		return handleOpCode(&eqStruct.GuildsList{}, p)
+	case "OP_GuildUpdate":
+		return handleOpCode(&eqStruct.GuildUpdate{}, p)
+	case "OP_SendZonepoints":
+		return handleOpCode(&eqStruct.ZonePoints{}, p)
+	case "OP_LFGCommand":
+		return handleLFGCommand(p)
+	case "OP_Weather":
+		return handleOpCode(&eqStruct.Weather{}, p)
+	case "OP_TimeOfDay":
+		return handleOpCode(&eqStruct.Time{}, p)
+	case "OP_SpawnDoor":
+		return handleOpCode(&eqStruct.SpawnDoors{}, p)
+	case "OP_ChannelMessage":
+		return handleOpCode(&eqStruct.ChannelMessage{}, p)
+	case "OP_ReqNewZone":
+	case "OP_SetChatServer":
+	case "OP_ChecksumSpell":
+	case "OP_ChecksumExe":
+	case "OP_ExpansionInfo":
+	case "OP_ZoneEntryResend":
+	case "OP_SendCharInfo":
+	case "OP_DataRate":
 	default:
 		slog.Info("unhandled type: ", "type", op, "dir", p.stream.dir)
 	}
@@ -497,6 +558,10 @@ func (c *gameClient) handlePlayEQ(p *StreamPacket) error {
 		return err
 	}
 
+	if err := dnsCheck(&ply.IP); err != nil {
+		return fmt.Errorf("zone server dns lookup failure: %w", err)
+	}
+
 	Key := fmt.Sprintf("%s:%d", ply.IP, 9000)
 	fKey, rKey := "dst-"+Key, "src-"+Key
 
@@ -554,6 +619,10 @@ func (c *gameClient) handleZoneServerInfo(p *StreamPacket) error {
 
 	slog.Debug("zoning event detected", "client", c.id)
 
+	if err := dnsCheck(&s.IP); err != nil {
+		return fmt.Errorf("zone server dns lookup failure: %w", err)
+	}
+
 	Key := fmt.Sprintf("%s:%d", s.IP, s.Port)
 	fKey, rKey := "dst-"+Key, "src-"+Key
 
@@ -565,13 +634,30 @@ func (c *gameClient) handleZoneServerInfo(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handleZoneEntry(p *StreamPacket) error {
-	s := &eqStruct.ServerZoneEntry{}
+func (c *gameClient) handleZoneEntryServer(p *StreamPacket) error {
+	s := &eqStruct.ZoneEntryServer{}
 	if err := handleOpCode(s, p); err != nil {
 		return err
 	}
 
 	if c.matchChar(s.Name) {
+		return nil
+	}
+
+	if err := c.parent.RegisterCharacter(c); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *gameClient) handleZoneEntryClient(p *StreamPacket) error {
+	s := &eqStruct.ZoneEntryClient{}
+	if err := handleOpCode(s, p); err != nil {
+		return err
+	}
+
+	if c.matchChar(s.CharName) {
 		return nil
 	}
 
@@ -618,13 +704,55 @@ func (c *gameClient) handleLoginAccept(p *StreamPacket) error {
 	return nil
 }
 
+func handleRaidUpdate(p *StreamPacket) error {
+	switch len(p.packet.Payload) { // Hacky way to avoid tracking raid state
+	case lenRaidCreate:
+		return handleOpCode(&eqStruct.RaidCreate{}, p)
+	case lenRaidAddMember:
+		return handleOpCode(&eqStruct.RaidAddMember{}, p)
+	case lenRaidGeneral:
+		return handleOpCode(&eqStruct.RaidGeneral{}, p)
+	default:
+		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.packet.Payload), "dir", p.stream.dir)
+	}
+
+	return nil
+}
+
+func handleLFGCommand(p *StreamPacket) error {
+	switch len(p.packet.Payload) { // Hacky way to avoid tracking raid state
+	case lenLFGAppearance:
+		return handleOpCode(&eqStruct.LFGAppearance{}, p)
+	case lenLFGCommand:
+		return handleOpCode(&eqStruct.LFG{}, p)
+	default:
+		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.packet.Payload), "dir", p.stream.dir)
+	}
+
+	return nil
+}
+
 func handleOpCode[T eqStruct.EQStruct](s T, p *StreamPacket) error {
-	if err := s.Unmarshal(p.packet.Payload); err != nil {
+	if _, err := s.Unmarshal(p.packet.Payload); err != nil {
 		slog.Error("failed unmarshaling", "error", err, "struct", s)
 		return fmt.Errorf("failed to unmarshal %T: %w", s, err)
 	}
 
 	p.Obj = s
+
+	return nil
+}
+
+func dnsCheck(field *string) error {
+	dns := letterTest.FindString(*field)
+	if dns != "" {
+		ip, err := net.LookupIP(*field)
+		if err != nil {
+			return fmt.Errorf("failed dns lookup: %w", err)
+		}
+
+		*field = ip[0].String()
+	}
 
 	return nil
 }

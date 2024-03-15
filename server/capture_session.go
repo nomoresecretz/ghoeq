@@ -92,7 +92,9 @@ func (s *session) Run(ctx context.Context, src string, d opDecoder) error {
 		return s.handleClients(wctx, apcb)
 	})
 
-	return wg.Wait()
+	err = wg.Wait()
+
+	return err
 }
 
 // Close closes the underlying source, causing a chain of graceful closures up the handler stack, ultimately gracefully ending the session. Non Blocking.
@@ -101,8 +103,10 @@ func (s *session) Close() {
 	s.onceClose.Do(func() {
 		if s.clientChan == nil {
 			s.closeClients()
+
 			return
 		}
+
 		close(s.clientChan)
 	})
 }
@@ -164,7 +168,7 @@ func (s *session) processPackets(ctx context.Context, cin <-chan StreamPacket) e
 
 func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("processpacket ctx abort: %w", err)
 	}
 
 	ap := p.packet
@@ -194,11 +198,11 @@ func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter)
 	p.stream.rb.Add(p)
 
 	if err := s.clientSend(ctx, p); err != nil {
-		return err
+		return fmt.Errorf("failed client send: %w", err)
 	}
 
 	if err := p.stream.FanOut(ctx, p); err != nil {
-		return err
+		return fmt.Errorf("failed fanout: %w", err)
 	}
 
 	return nil
@@ -258,6 +262,7 @@ func (s *session) clientSend(ctx context.Context, p StreamPacket) error {
 	default:
 		return fmt.Errorf("failed to send to client handler: %s", s.id)
 	}
+
 	return nil
 }
 
@@ -268,6 +273,7 @@ func (c *sessionClient) String() string {
 func (s *session) AddClient(ctx context.Context) (*sessionClient, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	ch := make(chan StreamPacket, clientBuffer)
 	cinfo, ok := peer.FromContext(ctx)
 

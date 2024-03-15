@@ -7,20 +7,17 @@ import (
 	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 )
 
-func (s *ghoeqServer) handleSessionRequest(r *pb.ModifyRequest) error {
+func (s *ghoeqServer) handleSessionRequest(r *pb.ModifyRequest) (string, error) {
 	switch r.GetState() {
 	case pb.State_STATE_START:
-		_, err := s.handleSessionStartRequest(r)
-		if err != nil {
-			return err
-		}
+		return s.handleSessionStartRequest(r)
 	case pb.State_STATE_STOP:
-		return fmt.Errorf("unimplemented")
+		return "", fmt.Errorf("unimplemented")
 	case pb.State_STATE_UNKNOWN:
-		return fmt.Errorf("unknown state requested")
+		return "", fmt.Errorf("unknown state requested")
 	}
 
-	return nil
+	return "", nil
 }
 
 func (s *ghoeqServer) handleSessionStartRequest(r *pb.ModifyRequest) (string, error) {

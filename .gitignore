@@ -10,6 +10,7 @@
 
 # Test binary, built with `go test -c`
 *.test
+packetlog.*
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
@@ -32,6 +33,7 @@ go.work.sum
 # VScode stuff
 .vscode/
 *.code-workspace
+.env
 
 #slog output
 debug.log

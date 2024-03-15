@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -162,6 +163,7 @@ func (s *stream) Clean() {
 		delete(s.gameClient.streams, s.key)
 		s.gameClient.mu.Unlock()
 	}
+
 	s.Close()
 	s.mu.Unlock()
 }
@@ -179,7 +181,9 @@ func (s *stream) Proto() *pb.Stream {
 }
 
 func (s *stream) Close() {
-	s.once.Do(func() { close(s.ch) }) // Lazy fix because I'm tired.
+	ch := s.ch
+	s.ch = nil
+	s.once.Do(func() { close(ch) }) // Lazy fix because I'm tired.
 }
 
 func (s *stream) Accept(p gopacket.Layer, ci gopacket.CaptureInfo, dir assembler.FlowDirection, nSeq assembler.Sequence, start *bool, ac assembler.AssemblerContext) bool {
@@ -189,7 +193,11 @@ func (s *stream) Accept(p gopacket.Layer, ci gopacket.CaptureInfo, dir assembler
 func (s *stream) FanOut(ctx context.Context, p StreamPacket) error {
 	select {
 	case <-ctx.Done():
+		return ctx.Err()
 	case s.ch <- p:
+		if s.ch == nil {
+			return fmt.Errorf("attempt to send on closed stream")
+		}
 	default:
 		slog.Error("failed to send packet", "packet", p)
 	}
@@ -200,9 +208,10 @@ func (s *stream) FanOut(ctx context.Context, p StreamPacket) error {
 func (s *stream) Process(ctx context.Context, p StreamPacket) error {
 	select {
 	case <-ctx.Done():
+		return ctx.Err()
 	case s.sf.cout <- p:
-	default:
-		slog.Error("failed to send packet to processing")
+		//	default:
+		//		slog.Error("failed to send packet to processing")
 	}
 
 	return nil
@@ -240,7 +249,7 @@ func (s *stream) Identify(p *eqOldPacket.EQApplication) {
 	}
 
 	if s.sType == ST_ZONE {
-		time.Sleep(time.Second) // Lets hold a moment and see if the predict comes in.
+		// time.Sleep(time.Second) // Lets hold a moment and see if the predict comes in.
 	}
 
 	if s.sType != ST_UNKNOWN {

@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	structPb "github.com/nomoresecretz/ghoeq-common/proto/eqstruct"
 	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -45,15 +44,10 @@ func (s *ghoeqServer) validSource(src string) bool {
 	return v || len(s.allowedDev) == 0
 }
 
-func (s *ghoeqServer) Run(ctx context.Context, d opDecoder) error {
-	g, wctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		s.sMgr = NewSessionManager()
+func (s *ghoeqServer) Run(ctx context.Context, d opDecoder, singleMode bool) error {
+	s.sMgr = NewSessionManager()
 
-		return s.sMgr.Go(wctx, s, d)
-	})
-
-	return g.Wait()
+	return s.sMgr.Run(ctx, s, d, singleMode)
 }
 
 func (s *ghoeqServer) ListSources(ctx context.Context, r *pb.ListRequest) (*pb.ListSourcesResponse, error) {
@@ -118,14 +112,23 @@ func (s *ghoeqServer) ListStreams(ctx context.Context, r *pb.ListStreamRequest) 
 	return &pb.ListStreamsResponse{Streams: streams}, nil
 }
 
-func (s *ghoeqServer) ModifySession(ctx context.Context, r *pb.ModifySessionRequest) (*pb.SessionResponse, error) {
+func (s *ghoeqServer) ModifySession(ctx context.Context, r *pb.ModifySessionRequest) (*pb.ModifySessionResponse, error) {
+	rpl := []*pb.SessionResponse{}
+
 	for _, m := range r.Mods {
-		if err := s.handleSessionRequest(m); err != nil {
+		r, err := s.handleSessionRequest(m)
+		if err != nil {
 			return nil, err
 		}
+		rpl = append(rpl, &pb.SessionResponse{
+			Id:    r,
+			State: m.State,
+		})
 	}
 
-	return &pb.SessionResponse{}, nil
+	return &pb.ModifySessionResponse{
+		Responses: rpl,
+	}, nil
 }
 
 // AttachClient notifies of new streams for a given client track.
@@ -192,7 +195,10 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 				strz = append(strz, streamProto)
 				seen[v.id] = struct{}{}
 			}
-			stream.Send(&pb.ClientUpdate{Streams: strz})
+
+			if err := stream.Send(&pb.ClientUpdate{Streams: strz}); err != nil {
+				return err
+			}
 		}
 	}
 }

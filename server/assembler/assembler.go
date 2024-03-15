@@ -87,7 +87,7 @@ func (a *assembler) AssembleWithContext(ctx context.Context, netFlow, portFlow g
 	key := Key{netFlow, portFlow}
 	pool := a.pool
 
-	conn := pool.getConnection(ctx, key, false, timestamp, p, ac)
+	conn := pool.getConnection(ctx, key, false, p, ac)
 	if conn == nil {
 		return nil, nil, nil
 	}

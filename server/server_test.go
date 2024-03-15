@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"os"
+	"sync"
 	"testing"
 
 	"golang.org/x/sync/errgroup"
@@ -12,34 +15,31 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/davecgh/go-spew/spew"
+	"github.com/google/go-cmp/cmp"
 	"github.com/nomoresecretz/ghoeq-common/decoder"
 	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 )
 
-var opDefs = ""
-
 func TestServerFiles(t *testing.T) {
 	tests := map[string]struct {
-		interfaceList []string
-		source        string
-		want          any
-		wantErr       bool
-		wantClient    *pb.Client
+		addInterface bool
+		source       string
+		want         any
+		wantErr      bool
+		wantClient   *pb.Client
 	}{
-		/*
-			"Basic-1": {
-				[]string{"file://test1.pcap"},
-				"eth0",
-				nil,
-				false,
-				nil,
-			},
-		*/
+		"Adv-1": {
+			true,
+			"file://c:/tmp/gq/login3.pcapng",
+			nil,
+			false,
+			nil,
+		},
 	}
 
+	opDefs := os.Getenv("OPDEFS")
 	d := decoder.NewDecoder()
-	if err := d.LoadMap(opDefs); err != nil {
+	if err := d.LoadMap(opDefs); opDefs != "" && err != nil {
 		t.Fatalf("failed to create decoder: %s", err)
 	}
 
@@ -49,25 +49,32 @@ func TestServerFiles(t *testing.T) {
 		// Each path turns into a test: the test name is the filename without the
 		// extension.
 		t.Run(testName, func(t *testing.T) {
-			var gameClient *pb.Client
 			ctx := context.Background()
+			egS, sCtx := errgroup.WithContext(ctx)
+			egC, cCtx := errgroup.WithContext(ctx)
 
-			s, err := New(ctx, test.interfaceList)
+			interfaceList := []string{}
+			if test.addInterface {
+				interfaceList = append(interfaceList, test.source)
+			}
+
+			var gameClient *pb.Client
+
+			s, err := New(ctx, interfaceList)
 			if err != nil {
 				t.Fatalf("failed to make server: %s", err)
 			}
 
-			eg, nctx := errgroup.WithContext(ctx)
-
-			client, cf := testClient(t, nctx, s, eg)
+			client, cf := testClient(t, sCtx, s, egS)
 			defer cf()
 
-			eg.Go(func() error {
-				return s.Run(nctx, d)
+			egS.Go(func() error {
+				return s.Run(sCtx, d, true)
 			})
+
 			// Start test here
 
-			_, err = client.ModifySession(ctx, &pb.ModifySessionRequest{
+			rpl, err := client.ModifySession(ctx, &pb.ModifySessionRequest{
 				Mods: []*pb.ModifyRequest{{
 					State:  pb.State_STATE_START,
 					Source: test.source,
@@ -77,16 +84,21 @@ func TestServerFiles(t *testing.T) {
 				t.Fatalf("failed to start session: %v", err)
 			}
 
+			sesId := rpl.GetResponses()[0].Id
+
 			cClient, err := client.AttachClient(ctx, &pb.AttachClientRequest{})
 			if err != nil {
 				t.Fatalf("failed to start session: %v", err)
 			}
 
-			eg.Go(func() error {
+			packets := make(map[string]*[]any)
+			packetMu := &sync.RWMutex{}
+
+			egC.Go(func() error {
 				for {
 					clientRes, err := cClient.Recv()
 					if errors.Is(err, io.EOF) {
-						break
+						return nil
 					}
 
 					if err != nil {
@@ -98,40 +110,50 @@ func TestServerFiles(t *testing.T) {
 					}
 
 					for _, s := range clientRes.GetStreams() {
-						eg.Go(func() error {
-							return testStream(t, nctx, client, s)
+						egC.Go(func() error {
+							return testStream(t, cCtx, client, s, packets, sesId, packetMu)
 						})
 					}
 				}
-
-				return nil
 			})
 
-			// End test here
-			cf()
+			// end test here
 
-			err = eg.Wait()
-			if (err == nil) != test.wantErr {
+			err = egC.Wait()
+			if (err != nil) != test.wantErr {
 				t.Errorf("Err got %v when wantErr %t", err, test.wantErr)
 			}
 
-			// TODO: Final test comparison
-			//if diff := pretty.Diff(want, got); len(diff) != 0 {
-			//	t.Errorf("test diff: %s", diff)
-			//}
+			cf()
+
+			err = egS.Wait()
+			if (err != nil) != test.wantErr {
+				t.Errorf("Err got %v when wantErr %t", err, test.wantErr)
+			}
+
+			if diff := cmp.Diff(test.want, packets); diff != "" {
+				t.Errorf("test diff: %s", diff)
+			}
 		})
 	}
 }
 
-func testStream(t *testing.T, ctx context.Context, client pb.BackendServerClient, s *pb.Stream) error {
-	t.Helper()
+func testStream(t *testing.T, ctx context.Context, client pb.BackendServerClient, s *pb.Stream, out map[string]*[]any, sesId string, packetMu *sync.RWMutex) error {
+	// t.Helper()
 
-	sClient, err := client.AttachStreamStruct(ctx, &pb.AttachStreamRequest{
-		Id: s.GetId(),
+	sClient, err := client.AttachStreamRaw(ctx, &pb.AttachStreamRequest{
+		Id:        s.GetId(),
+		SessionId: sesId,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed attaching stream: %w", err)
 	}
+
+	arr := []any{}
+
+	packetMu.Lock()
+	out[s.Id] = &arr
+	packetMu.Unlock()
 
 	for {
 		p, err := sClient.Recv()
@@ -140,19 +162,16 @@ func testStream(t *testing.T, ctx context.Context, client pb.BackendServerClient
 		}
 
 		if err != nil {
-			return err
+			return fmt.Errorf("packet stream err: %w", err)
 		}
 
-		spew.Dump(p)
-		// TODO: test packets somehow, probably just a big array per stream
+		arr = append(arr, p)
 	}
 
 	return nil
 }
 
 func testClient(t *testing.T, ctx context.Context, server pb.BackendServerServer, eg *errgroup.Group) (pb.BackendServerClient, func()) {
-	t.Helper()
-
 	buffer := 101024 * 1024
 	lis := bufconn.Listen(buffer)
 
@@ -164,7 +183,7 @@ func testClient(t *testing.T, ctx context.Context, server pb.BackendServerServer
 
 	conn, err := grpc.DialContext(ctx, "",
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-			return lis.Dial()
+			return lis.DialContext(ctx)
 		}), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("error connecting to server: %v", err)
