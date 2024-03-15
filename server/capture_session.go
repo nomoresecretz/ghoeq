@@ -99,7 +99,10 @@ func (s *session) Run(ctx context.Context, src string, d opDecoder) error {
 
 // Close closes the underlying source, causing a chain of graceful closures up the handler stack, ultimately gracefully ending the session. Non Blocking.
 func (s *session) Close() {
-	s.handle.Close()
+	if s.handle != nil {
+		s.handle.Close()
+	}
+
 	s.onceClose.Do(func() {
 		if s.clientChan == nil {
 			s.closeClients()
