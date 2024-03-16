@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/nomoresecretz/ghoeq/server/cypher"
 )
@@ -75,12 +76,17 @@ func (c *crypter) Decrypt(s string, data []byte) ([]byte, error) {
 		cb.Flip(1)
 	}
 
-	z, err := zlib.NewReader(cb.NewReader(0))
+	z, err := zlib.NewReader(cb.NewReadCloser(0))
 	if err != nil {
 		return nil, fmt.Errorf("error decrypting (%s): %w", s, err)
 	}
 
 	defer z.Close()
 
-	return io.ReadAll(z)
+	b, err := io.ReadAll(z)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		slog.Error(fmt.Sprintf("error decrpyting %s", err))
+	}
+
+	return b, nil
 }

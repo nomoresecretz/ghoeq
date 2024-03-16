@@ -186,7 +186,7 @@ func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter)
 	if c.IsCrypted(opCode) {
 		res, err := c.Decrypt(opCode, ap.Payload)
 		if err != nil {
-			slog.Error(fmt.Sprintf("error decrpyting %s", err))
+			return fmt.Errorf("error decrpyting: %w", err)
 		}
 
 		ap.Payload = res

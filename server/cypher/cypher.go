@@ -91,8 +91,8 @@ func NewCBox(s int, c Cypher) *cypherbox {
 }
 
 // NewReader returns an io.readerized version of the basic Dump function.
-func (c *cypherbox) NewReader(skip int) io.Reader {
-	return bytes.NewReader(c.Dump(skip))
+func (c *cypherbox) NewReadCloser(skip int) io.ReadCloser {
+	return io.NopCloser(bytes.NewReader(c.Dump(skip)))
 }
 
 func (c *cypherbox) Len() int {
