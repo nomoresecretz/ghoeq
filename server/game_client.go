@@ -381,6 +381,8 @@ func (c *gameClient) Run(p *StreamPacket) error {
 	case "OP_ZoneEntryResend":
 	case "OP_SendCharInfo":
 	case "OP_DataRate":
+	case "OP_Animation":
+	case "OP_Illusion": // TODO: Handle this one.
 	default:
 		slog.Info("unhandled type: ", "type", op, "dir", p.stream.dir)
 	}

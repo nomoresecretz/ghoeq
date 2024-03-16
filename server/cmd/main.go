@@ -76,7 +76,7 @@ func doStuff(ctx context.Context) error {
 
 	d := decoder.NewDecoder()
 	if err := d.LoadMap(*opMap); err != nil {
-		return err
+		return fmt.Errorf("unable to load decode map: %w", err)
 	}
 
 	var ops []grpc.ServerOption
