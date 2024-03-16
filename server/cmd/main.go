@@ -18,10 +18,12 @@ import (
 	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 )
 
+var opDefault = os.Getenv("OPDEFS")
+
 var (
-	opMap     = flag.String("opFile", "", "File with opcode mappings")
+	opMap     = flag.String("opFile", opDefault, "File with opcode mappings")
 	port      = flag.Uint("port", 6420, "port to listen on for connections")
-	bindAddr  = flag.String("bindAddr", "", "Network bind address")
+	bindAddr  = flag.String("bindAddr", "127.0.0.1", "Network bind address")
 	debugFlag = flag.Bool("debug", false, "enable debugging")
 )
 

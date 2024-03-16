@@ -115,9 +115,9 @@ func (sm *streamMgr) handlePacket(ctx context.Context, p gopacket.Packet, stream
 		return nil
 	}
 
-	p = gopacket.NewPacket(op.Payload, eqOldPacket.EQApplicationType, gopacket.Default)
+	np := gopacket.NewPacket(op.Payload, eqOldPacket.EQApplicationType, gopacket.Default)
 
-	eqold := p.Layer(eqOldPacket.EQApplicationType)
+	eqold := np.Layer(eqOldPacket.EQApplicationType)
 	if eqold == nil {
 		return nil
 	}

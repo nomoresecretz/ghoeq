@@ -187,6 +187,10 @@ func (s *stream) Close() {
 }
 
 func (s *stream) Accept(p gopacket.Layer, ci gopacket.CaptureInfo, dir assembler.FlowDirection, nSeq assembler.Sequence, start *bool, ac assembler.AssemblerContext) bool {
+	if s.ch == nil {
+		return false // we're closed.
+	}
+
 	return true
 }
 

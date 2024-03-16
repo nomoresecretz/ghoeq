@@ -261,7 +261,7 @@ func (s *session) clientSend(ctx context.Context, p StreamPacket) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case s.clientChan <- p:
+	case s.clientChan <- p: // TODO: handle closure properly
 	default:
 		return fmt.Errorf("failed to send to client handler: %s", s.id)
 	}

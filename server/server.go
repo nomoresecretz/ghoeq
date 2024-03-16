@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/google/uuid"
 	structPb "github.com/nomoresecretz/ghoeq-common/proto/eqstruct"
 	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
@@ -55,10 +57,16 @@ func (s *ghoeqServer) ListSources(ctx context.Context, r *pb.ListRequest) (*pb.L
 	if err != nil {
 		return nil, err
 	}
+
 	var rs []*pb.Source
 
+	seen := make(map[string]struct{})
+
 	l := len(s.allowedDev)
+
 	for _, i := range sl {
+		seen[i.Name] = struct{}{}
+
 		if !s.validSource(i.Name) && l > 0 {
 			continue
 		}
@@ -67,6 +75,15 @@ func (s *ghoeqServer) ListSources(ctx context.Context, r *pb.ListRequest) (*pb.L
 			Id:          i.Name,
 			Description: i.Description,
 		})
+	}
+
+	for s := range s.allowedDev {
+		if _, ok := seen[s]; !ok && strings.HasPrefix(s, "file://") {
+			rs = append(rs, &pb.Source{
+				Id:          s,
+				Description: s,
+			})
+		}
 	}
 
 	return &pb.ListSourcesResponse{
@@ -404,7 +421,7 @@ func (s *ghoeqServer) GracefulStop() {
 func (s *ghoeqServer) makeOutStructPacket(p StreamPacket) (*pb.ClientPacket, error) {
 	eqstr, err := getMsg(p)
 	if err != nil {
-		slog.Error("message failure: %w", err, "packet", p)
+		slog.Error("message failure: ", "error", err, "packet", spew.Sdump(p))
 	}
 
 	outP := &pb.ClientPacket{

@@ -352,7 +352,7 @@ func (c *gameClient) Run(p *StreamPacket) error {
 	case "OP_Death":
 		return handleOpCode(&eqStruct.Death{}, p)
 	case "OP_RaidUpdate":
-		return handleRaidUpdate(p)
+		return c.handleRaidUpdate(p)
 	case "OP_ApproveWorld":
 		return handleOpCode(&eqStruct.WorldApprove{}, p)
 	case "OP_GuildsList":
@@ -362,7 +362,7 @@ func (c *gameClient) Run(p *StreamPacket) error {
 	case "OP_SendZonepoints":
 		return handleOpCode(&eqStruct.ZonePoints{}, p)
 	case "OP_LFGCommand":
-		return handleLFGCommand(p)
+		return c.handleLFGCommand(p)
 	case "OP_Weather":
 		return handleOpCode(&eqStruct.Weather{}, p)
 	case "OP_TimeOfDay":
@@ -371,6 +371,8 @@ func (c *gameClient) Run(p *StreamPacket) error {
 		return handleOpCode(&eqStruct.SpawnDoors{}, p)
 	case "OP_ChannelMessage":
 		return handleOpCode(&eqStruct.ChannelMessage{}, p)
+	case "OP_ZoneChange":
+		return c.handleZoneChange(p)
 	case "OP_ReqNewZone":
 	case "OP_SetChatServer":
 	case "OP_ChecksumSpell":
@@ -725,7 +727,7 @@ func (c *gameClient) handleLoginAccept(p *StreamPacket) error {
 	return nil
 }
 
-func handleRaidUpdate(p *StreamPacket) error {
+func (c *gameClient) handleRaidUpdate(p *StreamPacket) error {
 	switch len(p.packet.Payload) { // Hacky way to avoid tracking raid state
 	case lenRaidCreate:
 		return handleOpCode(&eqStruct.RaidCreate{}, p)
@@ -740,12 +742,45 @@ func handleRaidUpdate(p *StreamPacket) error {
 	return nil
 }
 
-func handleLFGCommand(p *StreamPacket) error {
+func (c *gameClient) handleLFGCommand(p *StreamPacket) error {
 	switch len(p.packet.Payload) { // Hacky way to avoid tracking raid state
 	case lenLFGAppearance:
 		return handleOpCode(&eqStruct.LFGAppearance{}, p)
 	case lenLFGCommand:
 		return handleOpCode(&eqStruct.LFG{}, p)
+	default:
+		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.packet.Payload), "dir", p.stream.dir)
+	}
+
+	return nil
+}
+
+func (c *gameClient) handleZoneChangeServer(p *StreamPacket) error {
+	zc := &eqStruct.ZoneChange{}
+	if err := handleOpCode(zc, p); err != nil {
+		return err
+	}
+
+	switch zc.Success {
+	case 0:
+		panic("wtf how'd we get here")
+	case 1:
+	default:
+		return nil // some error, we don't care
+	}
+
+	p.stream.Close()
+	slog.Info("closing legacy zone stream")
+
+	return nil
+}
+
+func (c *gameClient) handleZoneChange(p *StreamPacket) error {
+	switch p.stream.dir { // Hacky way to avoid tracking raid state
+	case assembler.DirClientToServer:
+		return handleOpCode(&eqStruct.ZoneChangeReq{}, p)
+	case assembler.DirServerToClient:
+		return c.handleZoneChangeServer(p)
 	default:
 		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.packet.Payload), "dir", p.stream.dir)
 	}

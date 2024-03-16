@@ -9,7 +9,7 @@ import (
 	"github.com/gopacket/gopacket/pcap"
 )
 
-var maxFakeWait = 10 * time.Millisecond
+var maxFakeWait = 5 * time.Millisecond
 
 type fakePcap struct {
 	h     *pcap.Handle
