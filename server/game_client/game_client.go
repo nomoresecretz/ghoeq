@@ -1,4 +1,4 @@
-package server
+package game_client
 
 import (
 	"context"
@@ -7,12 +7,13 @@ import (
 	"net"
 	"regexp"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/nomoresecretz/ghoeq-common/eqStruct"
 	"github.com/nomoresecretz/ghoeq/server/assembler"
+	"github.com/nomoresecretz/ghoeq/server/common"
+	"github.com/nomoresecretz/ghoeq/server/stream"
 )
 
 const (
@@ -29,138 +30,152 @@ var letterTest = regexp.MustCompile(`[a-zA-Z]`)
 
 type predictEntry struct {
 	created time.Time
-	client  *gameClient
-	sType   streamType
+	client  *GameClient
+	sType   stream.StreamType
 	dir     assembler.FlowDirection
 }
 
 type streamPredict map[string]predictEntry
 
-type gameClientWatch struct {
+type GameClientWatch struct {
 	mu        sync.RWMutex
-	clients   map[uuid.UUID]*gameClient
+	clients   map[uuid.UUID]*GameClient
 	predicted streamPredict
 	ping      chan struct{}
-	decoder   opDecoder
-	charMap   map[string]*gameClient
-	acctMap   map[string]*gameClient
+	Decoder   common.OpDecoder
+	charMap   map[string]*GameClient
+	acctMap   map[string]*GameClient
+	db        *DB
 }
 
-type gameClient struct {
-	id              uuid.UUID
-	mu              sync.RWMutex
-	streams         map[assembler.Key]*stream
-	epoch           atomic.Uint32
-	ping            chan struct{}
-	decoder         opDecoder
-	parent          *gameClientWatch
-	clientServer    string                  // game server name.
-	clientSessionID string                  // Assigned by server.
-	clientCharacter string                  // game client character.
-	PlayerProfile   *eqStruct.PlayerProfile // temporary for testing.
+type GameClient struct {
+	ID              uuid.UUID
+	Mu              sync.RWMutex
+	Streams         map[assembler.Key]*stream.Stream
+	Ping            chan struct{}
+	decoder         common.OpDecoder
+	parent          *GameClientWatch
+	clientServer    string // game server name.
+	clientSessionID string // Assigned by server.
+	clientCharacter string // game client character.
+	PlayerProfile   *eqStruct.PlayerProfile
+	db              *DB
 }
 
-func NewPredict(gc *gameClient, s streamType, dir assembler.FlowDirection) predictEntry {
+func NewPredict(gc *GameClient, s stream.StreamType, dir assembler.FlowDirection) predictEntry {
 	return predictEntry{
-		created: now(),
+		created: time.Now(), // TODO: varify this for testing.
 		client:  gc,
 		sType:   s,
 		dir:     dir,
 	}
 }
 
-func NewClientWatch() *gameClientWatch {
-	return &gameClientWatch{
-		clients:   make(map[uuid.UUID]*gameClient),
+func NewClientWatch() (*GameClientWatch, error) {
+	db, err := newDB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create db: %w", err)
+	}
+
+	return &GameClientWatch{
+		clients:   make(map[uuid.UUID]*GameClient),
 		ping:      make(chan struct{}),
 		predicted: make(streamPredict),
-		charMap:   make(map[string]*gameClient),
-		acctMap:   make(map[string]*gameClient),
-	}
+		charMap:   make(map[string]*GameClient),
+		acctMap:   make(map[string]*GameClient),
+		db:        db,
+	}, nil
 }
 
-func (c *gameClientWatch) newClient() *gameClient {
-	gc := &gameClient{
-		id:      uuid.New(),
-		streams: make(map[assembler.Key]*stream),
-		ping:    make(chan struct{}),
-		decoder: c.decoder,
+func (c *GameClientWatch) newClient() *GameClient {
+	gc := &GameClient{
+		ID:      uuid.New(),
+		Streams: make(map[assembler.Key]*stream.Stream),
+		Ping:    make(chan struct{}),
+		decoder: c.Decoder,
 		parent:  c,
+		db:      c.db,
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.clients[gc.id] = gc
+	c.clients[gc.ID] = gc
 	c.LockedPing()
 
-	slog.Debug("new game client tracked", "client", gc.id)
+	slog.Debug("new game client tracked", "client", gc.ID)
 
 	return gc
 }
 
-func (c *gameClient) AddStream(s *stream) {
+func (c *GameClient) DeleteStream(s assembler.Key) {
+	c.Mu.Lock()
+	delete(c.Streams, s)
+	c.Mu.Unlock()
+}
+
+func (c *GameClient) AddStream(s *stream.Stream) {
 	slog.Debug("gameClient stream added")
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.streams[s.key] = s
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	c.Streams[s.Key] = s
 	c.LockedPing()
 }
 
-func (c *gameClient) LockedPing() {
+func (c *GameClient) LockedPing() {
+	ping := c.Ping
+	c.Ping = make(chan struct{})
+
+	close(ping)
+}
+
+func (c *GameClientWatch) LockedPing() {
 	ping := c.ping
 	c.ping = make(chan struct{})
 
 	close(ping)
 }
 
-func (c *gameClientWatch) LockedPing() {
-	ping := c.ping
-	c.ping = make(chan struct{})
-
-	close(ping)
-}
-
-func (c *gameClientWatch) CheckFull(p *StreamPacket, pr predictEntry, b bool) bool {
+func (c *GameClientWatch) CheckFull(p *stream.StreamPacket, pr predictEntry, b bool) bool {
 	invalid := time.Now().Add(maxPredictTime)
 	if !b || pr.created.After(invalid) {
 		return false
 	}
 
-	p.stream.dir = pr.dir
-	p.stream.sType = pr.sType
-	p.stream.gameClient = pr.client
+	p.Stream.Dir = pr.dir
+	p.Stream.Type = pr.sType
+	p.Stream.GameClient = pr.client
 
 	if pr.client == nil {
 		return true
 	}
 
-	pr.client.AddStream(p.stream)
+	pr.client.AddStream(p.Stream)
 
 	return true
 }
 
-func (c *gameClientWatch) CheckReverse(p *StreamPacket, rpr predictEntry, b bool) bool {
+func (c *GameClientWatch) CheckReverse(p *stream.StreamPacket, rpr predictEntry, b bool) bool {
 	invalid := time.Now().Add(maxPredictTime)
 	if !b || rpr.created.After(invalid) {
 		return false
 	}
 
-	p.stream.dir = rpr.dir.Reverse()
-	p.stream.sType = rpr.sType
-	p.stream.gameClient = rpr.client
+	p.Stream.Dir = rpr.dir.Reverse()
+	p.Stream.Type = rpr.sType
+	p.Stream.GameClient = rpr.client
 
 	if rpr.client == nil {
 		return true
 	}
 
-	rpr.client.AddStream(p.stream)
+	rpr.client.AddStream(p.Stream)
 
 	return true
 }
 
-func (c *gameClientWatch) CheckHalf(p *StreamPacket) bool {
-	testKey := fmt.Sprintf("dst-%s:%s", p.stream.net.Dst().String(), p.stream.port.Dst().String())
-	testKeyR := fmt.Sprintf("src-%s:%s", p.stream.net.Src().String(), p.stream.port.Src().String())
+func (c *GameClientWatch) CheckHalf(p *stream.StreamPacket) bool {
+	testKey := fmt.Sprintf("dst-%s:%s", p.Stream.Net.Dst().String(), p.Stream.Port.Dst().String())
+	testKeyR := fmt.Sprintf("src-%s:%s", p.Stream.Net.Src().String(), p.Stream.Port.Src().String())
 
 	c.mu.RLock()
 	prF, okF := c.predicted[testKey]
@@ -168,29 +183,29 @@ func (c *gameClientWatch) CheckHalf(p *StreamPacket) bool {
 	c.mu.RUnlock()
 
 	if okF {
-		p.stream.dir = prF.dir
-		p.stream.sType = prF.sType
-		p.stream.gameClient = prF.client
+		p.Stream.Dir = prF.dir
+		p.Stream.Type = prF.sType
+		p.Stream.GameClient = prF.client
 
 		if prF.client == nil {
 			return true
 		}
 
-		prF.client.AddStream(p.stream)
+		prF.client.AddStream(p.Stream)
 
 		return true
 	}
 
 	if okB {
-		p.stream.dir = prB.dir
-		p.stream.sType = prB.sType
-		p.stream.gameClient = prB.client
+		p.Stream.Dir = prB.dir
+		p.Stream.Type = prB.sType
+		p.Stream.GameClient = prB.client
 
 		if prB.client == nil {
 			return true
 		}
 
-		prB.client.AddStream(p.stream)
+		prB.client.AddStream(p.Stream)
 
 		return true
 	}
@@ -198,10 +213,10 @@ func (c *gameClientWatch) CheckHalf(p *StreamPacket) bool {
 	return false
 }
 
-func (c *gameClientWatch) Check(p *StreamPacket) bool {
+func (c *GameClientWatch) Check(p *stream.StreamPacket) bool {
 	c.mu.RLock()
-	pr, ok1 := c.predicted[p.stream.key.String()]
-	rv := p.stream.key.Reverse()
+	pr, ok1 := c.predicted[p.Stream.Key.String()]
+	rv := p.Stream.Key.Reverse()
 	rpr, ok2 := c.predicted[rv.String()]
 	c.mu.RUnlock()
 
@@ -220,16 +235,16 @@ func (c *gameClientWatch) Check(p *StreamPacket) bool {
 	return false
 }
 
-func (c *gameClientWatch) newPredictClient(p *StreamPacket) {
-	rv := p.stream.key.Reverse()
+func (c *GameClientWatch) newPredictClient(p *stream.StreamPacket) {
+	rv := p.Stream.Key.Reverse()
 	cli := c.newClient()
-	slog.Info("unknown/new client thread seen, adding client", "client", cli.id, "streamtype", p.stream.sType.String())
-	p.stream.gameClient = cli
-	cli.AddStream(p.stream)
-	c.predicted[rv.String()] = NewPredict(cli, p.stream.sType, p.stream.dir.Reverse())
+	slog.Info("unknown/new client thread seen, adding client", "client", cli.ID, "streamtype", p.Stream.Type.String())
+	p.Stream.GameClient = cli
+	cli.AddStream(p.Stream)
+	c.predicted[rv.String()] = NewPredict(cli, p.Stream.Type, p.Stream.Dir.Reverse())
 }
 
-func (gw *gameClientWatch) GracefulStop() {
+func (gw *GameClientWatch) GracefulStop() {
 	for _, gc := range gw.clients {
 		gc.Close()
 	}
@@ -240,7 +255,7 @@ func (gw *gameClientWatch) GracefulStop() {
 	gw.ClosePing()
 }
 
-func (c *gameClientWatch) charMatch(n string) *gameClient {
+func (c *GameClientWatch) charMatch(n string) *GameClient {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -253,16 +268,16 @@ func (c *gameClientWatch) charMatch(n string) *gameClient {
 	return nil
 }
 
-func (c *gameClient) Close() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *GameClient) Close() {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
 	c.ClosePing()
 	c.parent.mu.Lock()
 	delete(c.parent.charMap, c.clientCharacter)
 	c.parent.mu.Unlock()
 }
 
-func (c *gameClientWatch) ClosePing() {
+func (c *GameClientWatch) ClosePing() {
 	ping := c.ping
 	c.ping = nil
 	if ping != nil {
@@ -270,28 +285,46 @@ func (c *gameClientWatch) ClosePing() {
 	}
 }
 
-func (c *gameClient) ClosePing() {
-	ping := c.ping
-	c.ping = nil
+func (c *GameClient) ClosePing() {
+	ping := c.Ping
+	c.Ping = nil
 	if ping != nil {
 		close(ping)
 	}
 }
 
-func (c *gameClient) Run(p *StreamPacket) error {
-	op := c.decoder.GetOp(p.opCode)
+func (c *GameClient) Run(p *stream.StreamPacket) error {
+	if err := c.process(p); err != nil {
+		return err
+	}
+
+	if err := c.db.Update(p); err != nil {
+		return err
+	}
+
+	return c.clientSend(p)
+}
+
+func (c *GameClient) clientSend(p *stream.StreamPacket) error {
+	// TODO: this.
+
+	return nil
+}
+
+func (c *GameClient) process(p *stream.StreamPacket) error {
+	op := c.decoder.GetOp(p.OpCode)
 
 	switch op {
 	case "":
-		slog.Debug("game client unknown opcode", "opcode", p.opCode.String())
+		slog.Debug("game client unknown opcode", "opcode", p.OpCode.String())
 	case "OP_PlayEverquestRequest":
 		return c.handlePlayEQ(p)
 	case "OP_LogServer":
-		if p.stream.dir == assembler.DirServerToClient {
+		if p.Stream.Dir == assembler.DirServerToClient {
 			return c.handleLogServer(p)
 		}
 	case "OP_PlayerProfile":
-		if p.stream.dir == assembler.DirServerToClient {
+		if p.Stream.Dir == assembler.DirServerToClient {
 			return handleOpCode(&eqStruct.PlayerProfile{}, p)
 		}
 	case "OP_EnterWorld":
@@ -299,13 +332,13 @@ func (c *gameClient) Run(p *StreamPacket) error {
 	case "OP_ZoneServerInfo":
 		return c.handleZoneServerInfo(p)
 	case "OP_ZoneEntry":
-		switch p.stream.dir {
+		switch p.Stream.Dir {
 		case assembler.DirServerToClient:
 			return c.handleZoneEntryServer(p)
 		case assembler.DirClientToServer:
 			return c.handleZoneEntryClient(p)
 		default:
-			slog.Info("unhandled type: ", "type", op, "dir", p.stream.dir)
+			slog.Info("unhandled type: ", "type", op, "dir", p.Stream.Dir)
 		}
 	case "OP_MobUpdate":
 		return handleOpCode(&eqStruct.SpawnPositionUpdates{}, p)
@@ -384,13 +417,13 @@ func (c *gameClient) Run(p *StreamPacket) error {
 	case "OP_Animation":
 	case "OP_Illusion": // TODO: Handle this one.
 	default:
-		slog.Info("unhandled type: ", "type", op, "dir", p.stream.dir)
+		slog.Info("unhandled type: ", "type", op, "dir", p.Stream.Dir)
 	}
 
 	return nil
 }
 
-func (gw *gameClientWatch) matchChar(n string) *gameClient {
+func (gw *GameClientWatch) matchChar(n string) *GameClient {
 	gw.mu.RLock()
 	defer gw.mu.RUnlock()
 
@@ -402,7 +435,7 @@ func (gw *gameClientWatch) matchChar(n string) *gameClient {
 	return nil
 }
 
-func (gw *gameClientWatch) matchAcct(n string) *gameClient {
+func (gw *GameClientWatch) matchAcct(n string) *GameClient {
 	gw.mu.RLock()
 	defer gw.mu.RUnlock()
 
@@ -414,7 +447,7 @@ func (gw *gameClientWatch) matchAcct(n string) *gameClient {
 	return nil
 }
 
-func (gw *gameClientWatch) RegisterCharacter(c *gameClient) error {
+func (gw *GameClientWatch) RegisterCharacter(c *GameClient) error {
 	gw.mu.Lock()
 	defer gw.mu.Unlock()
 
@@ -430,7 +463,7 @@ func (gw *gameClientWatch) RegisterCharacter(c *gameClient) error {
 	return nil
 }
 
-func (gw *gameClientWatch) RegisterAcct(c *gameClient) error {
+func (gw *GameClientWatch) RegisterAcct(c *GameClient) error {
 	gw.mu.Lock()
 	defer gw.mu.Unlock()
 
@@ -445,7 +478,7 @@ func (gw *gameClientWatch) RegisterAcct(c *gameClient) error {
 	return nil
 }
 
-func (c *gameClient) matchChar(n string) bool {
+func (c *GameClient) matchChar(n string) bool {
 	gc := c.parent.matchChar(n)
 	if gc == nil || gc == c {
 		return false
@@ -457,7 +490,7 @@ func (c *gameClient) matchChar(n string) bool {
 	return true
 }
 
-func (c *gameClient) matchAcct(n string) bool {
+func (c *GameClient) matchAcct(n string) bool {
 	gc := c.parent.matchAcct(n)
 	if gc == nil || gc == c {
 		return false
@@ -468,29 +501,29 @@ func (c *gameClient) matchAcct(n string) bool {
 	return true
 }
 
-func (c *gameClient) reduce(gc *gameClient) {
-	gc.mu.Lock()
-	c.mu.Lock()
+func (c *GameClient) reduce(gc *GameClient) {
+	gc.Mu.Lock()
+	c.Mu.Lock()
 
-	for _, s := range c.streams {
-		s.gameClient = gc
-		gc.streams[s.key] = s
-		delete(c.streams, s.key)
+	for _, s := range c.Streams {
+		s.GameClient = gc
+		gc.Streams[s.Key] = s
+		delete(c.Streams, s.Key)
 	}
 
 	c.parent.mu.Lock()
-	delete(c.parent.clients, c.id)
+	delete(c.parent.clients, c.ID)
 	gc.LockedPing()
 	c.parent.mu.Unlock()
-	c.mu.Unlock()
-	gc.mu.Unlock()
+	c.Mu.Unlock()
+	gc.Mu.Unlock()
 }
 
-func (c *gameClientWatch) Run(p *StreamPacket) error {
+func (c *GameClientWatch) Run(p *stream.StreamPacket) error {
 	if c.Check(p) {
-		slog.Debug("success matching unknown flow", "stream", p.stream.key.String())
+		slog.Debug("success matching unknown flow", "stream", p.Stream.Key.String())
 
-		if err := p.stream.gameClient.Run(p); err != nil {
+		if err := p.Stream.GameClient.Run(p); err != nil {
 			return err
 		}
 		return nil
@@ -498,28 +531,28 @@ func (c *gameClientWatch) Run(p *StreamPacket) error {
 
 	c.Check(p)
 
-	if p.stream.sType == ST_UNKNOWN {
-		p.stream.Identify(p.packet)
+	if p.Stream.Type == stream.ST_UNKNOWN {
+		p.Stream.Identify(p.Packet)
 	}
 
 	if c.Check(p) {
-		slog.Debug("fallback matching unknown flow", "stream", p.stream.key.String())
+		slog.Debug("fallback matching unknown flow", "stream", p.Stream.Key.String())
 
-		if err := p.stream.gameClient.Run(p); err != nil {
+		if err := p.Stream.GameClient.Run(p); err != nil {
 			return err
 		}
 	}
 
-	switch p.stream.sType {
-	case ST_WORLD, ST_LOGIN: // Wait for a zone event at minimum.
+	switch p.Stream.Type {
+	case stream.ST_WORLD, stream.ST_LOGIN: // Wait for a zone event at minimum.
 		c.newPredictClient(p)
-		return p.stream.gameClient.Run(p)
+		return p.Stream.GameClient.Run(p)
 	}
 
 	return nil
 }
 
-func (c *gameClientWatch) getFirstClient() string {
+func (c *GameClientWatch) getFirstClient() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -531,7 +564,7 @@ func (c *gameClientWatch) getFirstClient() string {
 }
 
 // WaitForClient obtains a named client, or can block waiting for first avaliable.
-func (c *gameClientWatch) WaitForClient(ctx context.Context, id string) (*gameClient, error) {
+func (c *GameClientWatch) WaitForClient(ctx context.Context, id string) (*GameClient, error) {
 	if id == "" {
 		c.mu.RLock()
 		p := c.ping
@@ -570,14 +603,14 @@ func (c *gameClientWatch) WaitForClient(ctx context.Context, id string) (*gameCl
 	return cli, nil
 }
 
-func (c *gameClient) PingChan() chan struct{} {
-	c.mu.RLock()
-	p := c.ping
-	c.mu.RUnlock()
+func (c *GameClient) PingChan() chan struct{} {
+	c.Mu.RLock()
+	p := c.Ping
+	c.Mu.RUnlock()
 	return p
 }
 
-func (c *gameClient) handlePlayEQ(p *StreamPacket) error {
+func (c *GameClient) handlePlayEQ(p *stream.StreamPacket) error {
 	ply := &eqStruct.PlayRequest{}
 	if err := handleOpCode(ply, p); err != nil {
 		return err
@@ -591,14 +624,14 @@ func (c *gameClient) handlePlayEQ(p *StreamPacket) error {
 	fKey, rKey := "dst-"+Key, "src-"+Key
 
 	c.parent.mu.Lock()
-	c.parent.predicted[fKey] = NewPredict(c, ST_WORLD, assembler.DirClientToServer)
-	c.parent.predicted[rKey] = NewPredict(c, ST_WORLD, assembler.DirServerToClient)
+	c.parent.predicted[fKey] = NewPredict(c, stream.ST_WORLD, assembler.DirClientToServer)
+	c.parent.predicted[rKey] = NewPredict(c, stream.ST_WORLD, assembler.DirServerToClient)
 	c.parent.mu.Unlock()
 
 	return nil
 }
 
-func (c *gameClient) handleLogServer(p *StreamPacket) error {
+func (c *GameClient) handleLogServer(p *stream.StreamPacket) error {
 	ls := &eqStruct.LogServer{}
 	if err := handleOpCode(ls, p); err != nil {
 		return err
@@ -611,7 +644,7 @@ func (c *gameClient) handleLogServer(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handleEnterWorld(p *StreamPacket) error {
+func (c *GameClient) handleEnterWorld(p *stream.StreamPacket) error {
 	ew := &eqStruct.EnterWorld{}
 	if err := handleOpCode(ew, p); err != nil {
 		return err
@@ -636,13 +669,13 @@ func (c *gameClient) handleEnterWorld(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handleZoneServerInfo(p *StreamPacket) error {
+func (c *GameClient) handleZoneServerInfo(p *stream.StreamPacket) error {
 	s := &eqStruct.ZoneServerInfo{}
 	if err := handleOpCode(s, p); err != nil {
 		return err
 	}
 
-	slog.Debug("zoning event detected", "client", c.id)
+	slog.Debug("zoning event detected", "client", c.ID)
 
 	if err := dnsCheck(&s.IP); err != nil {
 		return fmt.Errorf("zone server dns lookup failure: %w", err)
@@ -652,14 +685,14 @@ func (c *gameClient) handleZoneServerInfo(p *StreamPacket) error {
 	fKey, rKey := "dst-"+Key, "src-"+Key
 
 	c.parent.mu.Lock()
-	c.parent.predicted[fKey] = NewPredict(c, ST_ZONE, assembler.DirClientToServer)
-	c.parent.predicted[rKey] = NewPredict(c, ST_ZONE, assembler.DirServerToClient)
+	c.parent.predicted[fKey] = NewPredict(c, stream.ST_ZONE, assembler.DirClientToServer)
+	c.parent.predicted[rKey] = NewPredict(c, stream.ST_ZONE, assembler.DirServerToClient)
 	c.parent.mu.Unlock()
 
 	return nil
 }
 
-func (c *gameClient) handleZoneEntryServer(p *StreamPacket) error {
+func (c *GameClient) handleZoneEntryServer(p *stream.StreamPacket) error {
 	s := &eqStruct.ZoneEntryServer{}
 	if err := handleOpCode(s, p); err != nil {
 		return err
@@ -676,7 +709,7 @@ func (c *gameClient) handleZoneEntryServer(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handleZoneEntryClient(p *StreamPacket) error {
+func (c *GameClient) handleZoneEntryClient(p *stream.StreamPacket) error {
 	s := &eqStruct.ZoneEntryClient{}
 	if err := handleOpCode(s, p); err != nil {
 		return err
@@ -693,7 +726,7 @@ func (c *gameClient) handleZoneEntryClient(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handleSendLoginInfo(p *StreamPacket) error {
+func (c *GameClient) handleSendLoginInfo(p *stream.StreamPacket) error {
 	li := &eqStruct.LoginInfo{}
 	if err := handleOpCode(li, p); err != nil {
 		return err
@@ -711,7 +744,7 @@ func (c *gameClient) handleSendLoginInfo(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handleLoginAccept(p *StreamPacket) error {
+func (c *GameClient) handleLoginAccept(p *stream.StreamPacket) error {
 	li := &eqStruct.LoginAccepted{}
 	if err := handleOpCode(li, p); err != nil {
 		return err
@@ -729,8 +762,8 @@ func (c *gameClient) handleLoginAccept(p *StreamPacket) error {
 	return nil
 }
 
-func (c *gameClient) handleRaidUpdate(p *StreamPacket) error {
-	switch len(p.packet.Payload) { // Hacky way to avoid tracking raid state
+func (c *GameClient) handleRaidUpdate(p *stream.StreamPacket) error {
+	switch len(p.Packet.Payload) { // Hacky way to avoid tracking raid state
 	case lenRaidCreate:
 		return handleOpCode(&eqStruct.RaidCreate{}, p)
 	case lenRaidAddMember:
@@ -738,26 +771,26 @@ func (c *gameClient) handleRaidUpdate(p *StreamPacket) error {
 	case lenRaidGeneral:
 		return handleOpCode(&eqStruct.RaidGeneral{}, p)
 	default:
-		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.packet.Payload), "dir", p.stream.dir)
+		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.Packet.Payload), "dir", p.Stream.Dir)
 	}
 
 	return nil
 }
 
-func (c *gameClient) handleLFGCommand(p *StreamPacket) error {
-	switch len(p.packet.Payload) { // Hacky way to avoid tracking raid state
+func (c *GameClient) handleLFGCommand(p *stream.StreamPacket) error {
+	switch len(p.Packet.Payload) { // Hacky way to avoid tracking raid state
 	case lenLFGAppearance:
 		return handleOpCode(&eqStruct.LFGAppearance{}, p)
 	case lenLFGCommand:
 		return handleOpCode(&eqStruct.LFG{}, p)
 	default:
-		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.packet.Payload), "dir", p.stream.dir)
+		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.Packet.Payload), "dir", p.Stream.Dir)
 	}
 
 	return nil
 }
 
-func (c *gameClient) handleZoneChangeServer(p *StreamPacket) error {
+func (c *GameClient) handleZoneChangeServer(p *stream.StreamPacket) error {
 	zc := &eqStruct.ZoneChange{}
 	if err := handleOpCode(zc, p); err != nil {
 		return err
@@ -771,27 +804,27 @@ func (c *gameClient) handleZoneChangeServer(p *StreamPacket) error {
 		return nil // some error, we don't care
 	}
 
-	p.stream.Close()
+	p.Stream.Close()
 	slog.Info("closing legacy zone stream")
 
 	return nil
 }
 
-func (c *gameClient) handleZoneChange(p *StreamPacket) error {
-	switch p.stream.dir { // Hacky way to avoid tracking raid state
+func (c *GameClient) handleZoneChange(p *stream.StreamPacket) error {
+	switch p.Stream.Dir { // Hacky way to avoid tracking raid state
 	case assembler.DirClientToServer:
 		return handleOpCode(&eqStruct.ZoneChangeReq{}, p)
 	case assembler.DirServerToClient:
 		return c.handleZoneChangeServer(p)
 	default:
-		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.packet.Payload), "dir", p.stream.dir)
+		slog.Info("unhandled type: ", "type", "OP_RaidUpdate", "len", len(p.Packet.Payload), "dir", p.Stream.Dir)
 	}
 
 	return nil
 }
 
-func handleOpCode[T eqStruct.EQStruct](s T, p *StreamPacket) error {
-	if _, err := s.Unmarshal(p.packet.Payload); err != nil {
+func handleOpCode[T eqStruct.EQStruct](s T, p *stream.StreamPacket) error {
+	if _, err := s.Unmarshal(p.Packet.Payload); err != nil {
 		slog.Error("failed unmarshaling", "error", err, "struct", s)
 		return fmt.Errorf("failed to unmarshal %T: %w", s, err)
 	}

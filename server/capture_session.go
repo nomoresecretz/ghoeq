@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nomoresecretz/ghoeq-common/decoder"
+	"github.com/nomoresecretz/ghoeq/server/common"
+	"github.com/nomoresecretz/ghoeq/server/stream"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/peer"
 
@@ -16,8 +18,7 @@ import (
 )
 
 const (
-	clientBuffer = 50 // packets
-	procBuffer   = 50
+	procBuffer = 50
 )
 
 type sessionHandle interface {
@@ -33,13 +34,13 @@ type session struct {
 	sm         *streamMgr
 	mgr        *sessionMgr
 	clients    map[uuid.UUID]*sessionClient
-	clientChan chan<- StreamPacket
+	clientChan chan<- stream.StreamPacket
 	onceClose  sync.Once
 }
 
 type sessionClient struct {
 	id     uuid.UUID
-	handle chan StreamPacket
+	handle chan stream.StreamPacket
 	info   string
 	parent *session
 }
@@ -54,7 +55,7 @@ func NewSession(id uuid.UUID, src string, sm *sessionMgr) *session {
 }
 
 // Run does the actual capture session work, holding all goroutines for the lifetime of the capture session.
-func (s *session) Run(ctx context.Context, src string, d opDecoder) error {
+func (s *session) Run(ctx context.Context, src string, d common.OpDecoder) error {
 	h, err := getHandle(src)
 	if err != nil {
 		return fmt.Errorf("failed to get capture handle: %w", err)
@@ -65,8 +66,8 @@ func (s *session) Run(ctx context.Context, src string, d opDecoder) error {
 	defer h.Close()
 
 	// TODO: replace this with lockless ring buffer.
-	apc := make(chan StreamPacket, procBuffer)
-	apcb := make(chan StreamPacket, procBuffer)
+	apc := make(chan stream.StreamPacket, procBuffer)
+	apcb := make(chan stream.StreamPacket, procBuffer)
 	s.clientChan = apcb
 	sm := NewStreamMgr(d, s.mgr.clientWatch)
 	s.sm = sm
@@ -157,7 +158,7 @@ func (s *session) timeoutWatch(ctx context.Context) {
 */
 
 // processPackets is just a placeholder for the grunt work until the real structure exists.
-func (s *session) processPackets(ctx context.Context, cin <-chan StreamPacket) error {
+func (s *session) processPackets(ctx context.Context, cin <-chan stream.StreamPacket) error {
 	c := NewCrypter()
 
 	for p := range cin {
@@ -169,12 +170,12 @@ func (s *session) processPackets(ctx context.Context, cin <-chan StreamPacket) e
 	return nil
 }
 
-func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter) error {
+func (s *session) processPacket(ctx context.Context, p stream.StreamPacket, c *crypter) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("processpacket ctx abort: %w", err)
 	}
 
-	ap := p.packet
+	ap := p.Packet
 
 	d := s.sm.decoder
 
@@ -192,19 +193,19 @@ func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter)
 		ap.Payload = res
 	}
 
-	if p.stream.gameClient != nil {
-		p.stream.gameClient.Run(&p)
+	if p.Stream.GameClient != nil {
+		p.Stream.GameClient.Run(&p)
 	} else {
 		s.sm.clientWatch.Run(&p)
 	}
 
-	p.stream.rb.Add(p)
+	p.Stream.RB.Add(p)
 
 	if err := s.clientSend(ctx, p); err != nil {
 		return fmt.Errorf("failed client send: %w", err)
 	}
 
-	if err := p.stream.FanOut(ctx, p); err != nil {
+	if err := p.Stream.FanOut(ctx, p); err != nil {
 		return fmt.Errorf("failed fanout: %w", err)
 	}
 
@@ -212,7 +213,7 @@ func (s *session) processPacket(ctx context.Context, p StreamPacket, c *crypter)
 }
 
 // handleClients runs the fanout loop for client sessions.
-func (s *session) handleClients(ctx context.Context, apcb <-chan StreamPacket) error {
+func (s *session) handleClients(ctx context.Context, apcb <-chan stream.StreamPacket) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -247,17 +248,17 @@ func (s *session) closeClients() {
 }
 
 // Send relays the packet to the attached client session.
-func (c *sessionClient) Send(ctx context.Context, p StreamPacket) {
+func (c *sessionClient) Send(ctx context.Context, p stream.StreamPacket) {
 	// TODO: convert this to a ring buffer
 	select {
 	case c.handle <- p:
 	case <-ctx.Done():
 	default:
-		slog.Error("failed to send to client", "client", c, "opcode", p.opCode)
+		slog.Error("failed to send to client", "client", c, "opcode", p.OpCode)
 	}
 }
 
-func (s *session) clientSend(ctx context.Context, p StreamPacket) error {
+func (s *session) clientSend(ctx context.Context, p stream.StreamPacket) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -277,7 +278,7 @@ func (s *session) AddClient(ctx context.Context) (*sessionClient, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ch := make(chan StreamPacket, clientBuffer)
+	ch := make(chan stream.StreamPacket, common.ClientBuffer)
 	cinfo, ok := peer.FromContext(ctx)
 
 	var clientTag string

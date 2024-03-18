@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	structPb "github.com/nomoresecretz/ghoeq-common/proto/eqstruct"
 	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
+	"github.com/nomoresecretz/ghoeq/server/common"
+	"github.com/nomoresecretz/ghoeq/server/stream"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -46,9 +48,13 @@ func (s *ghoeqServer) validSource(src string) bool {
 	return v || len(s.allowedDev) == 0
 }
 
-func (s *ghoeqServer) Run(ctx context.Context, d opDecoder, singleMode bool) error {
-	s.sMgr = NewSessionManager()
+func (s *ghoeqServer) Run(ctx context.Context, d common.OpDecoder, singleMode bool) error {
+	sm, err := NewSessionManager()
+	if err != nil {
+		return err
+	}
 
+	s.sMgr = sm
 	return s.sMgr.Run(ctx, s, d, singleMode)
 }
 
@@ -119,7 +125,7 @@ func (s *ghoeqServer) ListStreams(ctx context.Context, r *pb.ListStreamRequest) 
 
 	var streams []*pb.Stream
 	for _, str := range sess.sm.clientStreams {
-		if streamId != "" && streamId != str.key.String() {
+		if streamId != "" && streamId != str.Key.String() {
 			continue
 		}
 		streams = append(streams, str.Proto())
@@ -160,7 +166,7 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 	var cupd *pb.Client
 	if r.GetClientId() == "" {
 		cupd = &pb.Client{
-			Id: string(cli.id.String()),
+			Id: string(cli.ID.String()),
 			// Address: cli., // TODO: add client address logic.
 		}
 	}
@@ -173,17 +179,17 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 
 	// Read lock the client, then grab the notice channel, and all the streams in one go before unlock.
 	var p chan struct{}
-	cli.mu.RLock()
-	p = cli.ping
+	cli.Mu.RLock()
+	p = cli.Ping
 
 	var strz []*pb.Stream
-	for _, v := range cli.streams {
+	for _, v := range cli.Streams {
 		streamProto := v.Proto()
-		streamProto.Session = v.sf.mgr.session.Proto()
+		streamProto.Session = v.SF.Mgr().(*streamMgr).session.Proto()
 		strz = append(strz, streamProto)
-		seen[v.id] = struct{}{}
+		seen[v.ID] = struct{}{}
 	}
-	cli.mu.RUnlock()
+	cli.Mu.RUnlock()
 
 	r1.Streams = strz
 	if err := stream.Send(r1); err != nil {
@@ -202,15 +208,15 @@ func (s *ghoeqServer) AttachClient(r *pb.AttachClientRequest, stream pb.BackendS
 
 			var strz []*pb.Stream
 
-			for _, v := range cli.streams {
+			for _, v := range cli.Streams {
 				streamProto := v.Proto()
-				if _, ok := seen[v.id]; ok {
+				if _, ok := seen[v.ID]; ok {
 					continue
 				}
 				slog.Debug("notifying watcher of new gameClient stream")
-				streamProto.Session = v.sf.mgr.session.Proto()
+				streamProto.Session = v.SF.Mgr().(*streamMgr).session.Proto()
 				strz = append(strz, streamProto)
-				seen[v.id] = struct{}{}
+				seen[v.ID] = struct{}{}
 			}
 
 			if err := stream.Send(&pb.ClientUpdate{Streams: strz}); err != nil {
@@ -253,12 +259,12 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRequest, stream pb.Backe
 	defer cStream.Close()
 
 	// send the backlog of packets seen before they attached.
-	op := str.rb.GetAll()
+	op := str.RB.GetAll()
 	slog.Debug("sending packet backlog")
 
 	seen := make(map[uint64]struct{})
 	for _, p := range op {
-		seen[p.seq] = struct{}{}
+		seen[p.Seq] = struct{}{}
 		outP := p.Proto()
 		if err := stream.Send(outP); err != nil {
 			return err
@@ -267,7 +273,7 @@ func (s *ghoeqServer) AttachStreamRaw(r *pb.AttachStreamRequest, stream pb.Backe
 
 	slog.Debug("looping new packets")
 
-	return s.sendLoopRaw(ctx, cStream.handle, stream, seen)
+	return s.sendLoopRaw(ctx, cStream.Handle, stream, seen)
 }
 
 type eqProto interface {
@@ -298,12 +304,12 @@ func (s *ghoeqServer) AttachStreamStruct(r *pb.AttachStreamRequest, stream pb.Ba
 	defer cStream.Close()
 
 	// send the backlog of packets seen before they attached.
-	op := str.rb.GetAll()
+	op := str.RB.GetAll()
 	slog.Debug("sending packet backlog")
 
 	seen := make(map[uint64]struct{})
 	for _, p := range op {
-		seen[p.seq] = struct{}{}
+		seen[p.Seq] = struct{}{}
 
 		outP, err := s.makeOutStructPacket(p)
 		if err != nil {
@@ -317,7 +323,7 @@ func (s *ghoeqServer) AttachStreamStruct(r *pb.AttachStreamRequest, stream pb.Ba
 
 	slog.Debug("looping new packets")
 
-	return s.sendLoopStruct(ctx, cStream.handle, stream, seen)
+	return s.sendLoopStruct(ctx, cStream.Handle, stream, seen)
 }
 
 // AttachSessionRaw provides a raw feed of a capture session app packets. Mostly intended for debugging.
@@ -351,7 +357,7 @@ type streamSenderStruct interface {
 	grpc.ServerStream
 }
 
-func (s *ghoeqServer) sendLoopRaw(ctx context.Context, handle <-chan StreamPacket, stream streamSender, seen map[uint64]struct{}) error {
+func (s *ghoeqServer) sendLoopRaw(ctx context.Context, handle <-chan stream.StreamPacket, stream streamSender, seen map[uint64]struct{}) error {
 	// loop sending the packets to the client
 	for {
 		select {
@@ -364,11 +370,11 @@ func (s *ghoeqServer) sendLoopRaw(ctx context.Context, handle <-chan StreamPacke
 
 			// Avoid double send
 			if seen != nil {
-				if _, ok := seen[p.seq]; ok {
+				if _, ok := seen[p.Seq]; ok {
 					continue
 				}
-				seen[p.seq] = struct{}{}
-				delete(seen, p.seq-100)
+				seen[p.Seq] = struct{}{}
+				delete(seen, p.Seq-100)
 			}
 
 			op := p.Proto()
@@ -380,7 +386,7 @@ func (s *ghoeqServer) sendLoopRaw(ctx context.Context, handle <-chan StreamPacke
 	}
 }
 
-func (s *ghoeqServer) sendLoopStruct(ctx context.Context, handle <-chan StreamPacket, stream streamSenderStruct, seen map[uint64]struct{}) error {
+func (s *ghoeqServer) sendLoopStruct(ctx context.Context, handle <-chan stream.StreamPacket, stream streamSenderStruct, seen map[uint64]struct{}) error {
 	// loop sending the packets to the client
 	for {
 		select {
@@ -393,11 +399,11 @@ func (s *ghoeqServer) sendLoopStruct(ctx context.Context, handle <-chan StreamPa
 
 			// Avoid double send
 			if seen != nil {
-				if _, ok := seen[p.seq]; ok {
+				if _, ok := seen[p.Seq]; ok {
 					continue
 				}
-				seen[p.seq] = struct{}{}
-				delete(seen, p.seq-100)
+				seen[p.Seq] = struct{}{}
+				delete(seen, p.Seq-100)
 			}
 
 			outP, err := s.makeOutStructPacket(p)
@@ -418,32 +424,32 @@ func (s *ghoeqServer) GracefulStop() {
 	s.sMgr.GracefulStop()
 }
 
-func (s *ghoeqServer) makeOutStructPacket(p StreamPacket) (*pb.ClientPacket, error) {
+func (s *ghoeqServer) makeOutStructPacket(p stream.StreamPacket) (*pb.ClientPacket, error) {
 	eqstr, err := getMsg(p)
 	if err != nil {
 		slog.Error("message failure: ", "error", err, "packet", spew.Sdump(p))
 	}
 
 	outP := &pb.ClientPacket{
-		Origin: timepb.New(p.origin),
-		Seq:    p.seq,
-		OpCode: uint32(p.opCode),
+		Origin: timepb.New(p.Origin),
+		Seq:    p.Seq,
+		OpCode: uint32(p.OpCode),
 		Struct: eqstr,
 	}
 
 	if s.debugFlag {
-		outP.Data = p.packet.Payload
+		outP.Data = p.Packet.Payload
 	}
 
 	if eqstr == nil {
-		outP.Data = p.packet.Payload
+		outP.Data = p.Packet.Payload
 	}
 
 	return outP, nil
 }
 
-func getMsg(p StreamPacket) (*structPb.DataStruct, error) {
-	if p.Obj == nil && p.packet.OpCode != 0x5f41 {
+func getMsg(p stream.StreamPacket) (*structPb.DataStruct, error) {
+	if p.Obj == nil && p.Packet.OpCode != 0x5f41 {
 		return nil, nil
 	}
 

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nomoresecretz/ghoeq/server/common"
+	"github.com/nomoresecretz/ghoeq/server/game_client"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -27,14 +29,19 @@ type sessionMgr struct {
 	ctrlChan    chan<- *sessionRequest
 	sessions    map[uuid.UUID]*session
 	parent      *ghoeqServer
-	clientWatch *gameClientWatch
+	clientWatch *game_client.GameClientWatch
 }
 
-func NewSessionManager() *sessionMgr {
+func NewSessionManager() (*sessionMgr, error) {
+	cw, err := game_client.NewClientWatch()
+	if err != nil {
+		return nil, fmt.Errorf("failed to make clientwatch: %w", err)
+	}
+
 	return &sessionMgr{
 		sessions:    make(map[uuid.UUID]*session),
-		clientWatch: NewClientWatch(),
-	}
+		clientWatch: cw,
+	}, nil
 }
 
 func (s *sessionMgr) genSessionID() uuid.UUID {
@@ -42,14 +49,14 @@ func (s *sessionMgr) genSessionID() uuid.UUID {
 }
 
 // Go manages goroutine lifetime for the sessions and message brokers.
-func (sm *sessionMgr) Run(ctx context.Context, gs *ghoeqServer, d opDecoder, singleMode bool) error {
+func (sm *sessionMgr) Run(ctx context.Context, gs *ghoeqServer, d common.OpDecoder, singleMode bool) error {
 	sm.parent = gs
 
 	return sm.requestHandler(ctx, d, singleMode)
 }
 
 // requestHandler runs the handler loop to manage capture sessions.
-func (s *sessionMgr) requestHandler(ctx context.Context, d opDecoder, singleMode bool) error {
+func (s *sessionMgr) requestHandler(ctx context.Context, d common.OpDecoder, singleMode bool) error {
 	g, wctx := errgroup.WithContext(ctx)
 	sc := make(chan *sessionRequest)
 	s.ctrlChan = sc
@@ -81,7 +88,7 @@ func (s *sessionMgr) requestHandler(ctx context.Context, d opDecoder, singleMode
 	return g.Wait()
 }
 
-func (sm *sessionMgr) handleRequest(ctx context.Context, d opDecoder, r *sessionRequest, g *errgroup.Group) error {
+func (sm *sessionMgr) handleRequest(ctx context.Context, d common.OpDecoder, r *sessionRequest, g *errgroup.Group) error {
 	switch r.mode {
 	case "Start":
 		// TODO: add duplicate checking
@@ -101,7 +108,7 @@ func (sm *sessionMgr) handleRequest(ctx context.Context, d opDecoder, r *session
 }
 
 // runCapture does the actual work of starting a capture session and holding the work goroutines.
-func (sm *sessionMgr) runCapture(ctx context.Context, d opDecoder, src string, c chan<- replyStruct) error {
+func (sm *sessionMgr) runCapture(ctx context.Context, d common.OpDecoder, src string, c chan<- replyStruct) error {
 	sm.muSessions.Lock()
 	index := sm.genSessionID()
 	s := NewSession(index, src, sm)

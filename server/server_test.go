@@ -103,7 +103,7 @@ func TestServerFiles(t *testing.T) {
 
 					for _, s := range clientRes.GetStreams() {
 						egC.Go(func() error {
-							return testStream(t, cCtx, client, s, packets, sesId, packetMu)
+							return testStream(cCtx, client, s, packets, sesId, packetMu)
 						})
 					}
 				}
@@ -130,7 +130,7 @@ func TestServerFiles(t *testing.T) {
 	}
 }
 
-func testStream(t *testing.T, ctx context.Context, client pb.BackendServerClient, s *pb.Stream, out map[string]*[]any, sesId string, packetMu *sync.RWMutex) error {
+func testStream(ctx context.Context, client pb.BackendServerClient, s *pb.Stream, out map[string]*[]any, sesId string, packetMu *sync.RWMutex) error {
 	// t.Helper()
 
 	sClient, err := client.AttachStreamRaw(ctx, &pb.AttachStreamRequest{
