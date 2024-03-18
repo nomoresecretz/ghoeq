@@ -469,7 +469,7 @@ func getMsg(p stream.StreamPacket) (*structPb.DataStruct, error) {
 	}
 
 	return &structPb.DataStruct{
-		Type: structPb.StructType(p.Obj.EQType()),
-		Msg:  anyMsg,
+		// Type: structPb.StructType(p.Obj.EQType()), // deprecated, to be removed
+		Msg: anyMsg,
 	}, nil
 }
