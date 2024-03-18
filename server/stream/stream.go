@@ -60,7 +60,7 @@ type Stream struct {
 	mu                sync.RWMutex
 	seq               uint64
 	Created, LastSeen time.Time
-	Clients           map[uuid.UUID]*streamClient
+	Clients           map[uuid.UUID]*StreamClient
 	LastClient        time.Time
 
 	once sync.Once
@@ -123,8 +123,6 @@ func (s *Stream) Process(ctx context.Context, p StreamPacket) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case s.SF.cout <- p:
-		//	default:
-		//		slog.Error("failed to send packet to processing")
 	}
 
 	return nil
@@ -136,6 +134,7 @@ func (s *Stream) String() string {
 
 func (s *Stream) Identify(p *eqOldPacket.EQApplication) {
 	sf := s.SF
+
 	switch decoder.OpCode(p.OpCode) {
 	case sf.oc["OP_LoginPC"]:
 		s.Dir = assembler.DirClientToServer
@@ -183,7 +182,7 @@ func (s *Stream) Identify(p *eqOldPacket.EQApplication) {
 	}
 }
 
-func (s *Stream) AttachToStream(ctx context.Context) (*streamClient, error) {
+func (s *Stream) AttachToStream(ctx context.Context) (*StreamClient, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -198,10 +197,10 @@ func (s *Stream) AttachToStream(ctx context.Context) (*streamClient, error) {
 	slog.Info("capture stream adding client", "type", s.Type.String(), "stream", s.Key.String(), "client", clientTag)
 
 	id := uuid.New()
-	c := &streamClient{
+	c := &StreamClient{
 		Handle: ch,
 		info:   clientTag,
-		parent: s,
+		Parent: s,
 		ID:     id,
 	}
 	s.Clients[id] = c
@@ -225,6 +224,12 @@ func (s *Stream) handleClients(ctx context.Context, apcb <-chan StreamPacket) er
 	}
 }
 
+func (s *Stream) DeleteClient(id uuid.UUID) {
+	s.mu.Lock()
+	delete(s.Clients, id)
+	s.mu.Unlock()
+}
+
 func (s *Stream) handleClientSend(ctx context.Context, ap StreamPacket) {
 	s.mu.RLock()
 	for _, c := range s.Clients {
@@ -242,6 +247,7 @@ func (s *Stream) handleClientClose() error {
 
 		handle := sc.Handle
 		sc.Handle = nil
+
 		close(handle)
 	}
 	s.mu.RUnlock()

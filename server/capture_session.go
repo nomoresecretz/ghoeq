@@ -194,9 +194,9 @@ func (s *session) processPacket(ctx context.Context, p stream.StreamPacket, c *c
 	}
 
 	if p.Stream.GameClient != nil {
-		p.Stream.GameClient.Run(&p)
+		p.Stream.GameClient.Run(ctx, &p)
 	} else {
-		s.sm.clientWatch.Run(&p)
+		s.sm.clientWatch.Run(ctx, &p)
 	}
 
 	p.Stream.RB.Add(p)

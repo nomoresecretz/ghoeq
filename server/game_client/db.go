@@ -18,7 +18,7 @@ var StreamIDIndex = &memdb.StringFieldIndex{
 }
 
 var SpawnID_StreamID_IndexSchema = &memdb.IndexSchema{
-	Name:   "SpawnID-StreamID",
+	Name:   "id",
 	Unique: true,
 	Indexer: &memdb.CompoundIndex{
 		Indexes: []memdb.Indexer{
@@ -39,8 +39,8 @@ var dbSchema = &memdb.DBSchema{
 		"spawns": {
 			Name: "spawns",
 			Indexes: map[string]*memdb.IndexSchema{
-				"SpawnID-StreamID": SpawnID_StreamID_IndexSchema,
-				"StreamID":         SpawnID_IndexSchema,
+				"id":       SpawnID_StreamID_IndexSchema,
+				"StreamID": SpawnID_IndexSchema,
 			},
 		},
 		"spawnUpdates": {
@@ -59,8 +59,8 @@ var dbSchema = &memdb.DBSchema{
 						},
 					},
 				},
-				"SpawnID-StreamID": SpawnID_StreamID_IndexSchema,
-				"StreamID":         SpawnID_IndexSchema,
+				"id":       SpawnID_StreamID_IndexSchema,
+				"StreamID": SpawnID_IndexSchema,
 			},
 		},
 	},
@@ -73,6 +73,7 @@ type DB struct {
 type Spawn struct {
 	*eqStruct.ZoneSpawn
 	SpawnID    uint16
+	SpawnTime  time.Time
 	StreamID   string
 	LastUpdate time.Time
 }
@@ -144,6 +145,7 @@ func (d *DB) DeleteSpawn(p *stream.StreamPacket, s *eqStruct.DeleteSpawn) error 
 	if err := txn.Delete("spawns", sp); err != nil {
 		return err
 	}
+
 	if _, err := txn.DeleteAll("spawnUpdates", "SpawnID-StreamID", sp); err != nil {
 		return err
 	}
@@ -164,6 +166,7 @@ func (d *DB) UpdateSpawn(p *stream.StreamPacket, z *eqStruct.ZoneSpawn, itxn *me
 	if err := txn.Insert("spawns", Spawn{
 		ZoneSpawn:  z,
 		StreamID:   p.Stream.ID,
+		SpawnTime:  p.Origin,
 		LastUpdate: p.Origin,
 	}); err != nil {
 		return fmt.Errorf("failed inserting spawn (%v): %w", z, err)
@@ -210,4 +213,56 @@ func (d *DB) SpawnUpdate(p *stream.StreamPacket, z eqStruct.EQStruct, uType Upda
 	}
 
 	return nil
+}
+
+func (d *DB) HistoricSpawns(streamID string, epoch time.Time) ([]*Spawn, error) {
+	txn := d.db.Txn(false)
+
+	spIterator, err := txn.Get("spawns", "StreamID", streamID)
+	if err != nil {
+		return nil, err
+	}
+
+	spawns := []*Spawn{}
+
+	for obj := spIterator.Next(); obj != nil; obj = spIterator.Next() {
+		sp, ok := obj.(*Spawn)
+		if !ok {
+			return nil, fmt.Errorf("incorrect type, should not happen")
+		}
+
+		if sp.SpawnTime.After(epoch) {
+			continue
+		}
+
+		spawns = append(spawns, sp)
+	}
+
+	return spawns, nil
+}
+
+func (d *DB) HistoricSpawnUpdates(streamID string, epoch time.Time) ([]*SpawnUpdate, error) {
+	txn := d.db.Txn(false)
+
+	spIterator, err := txn.Get("spawns", "StreamID", streamID)
+	if err != nil {
+		return nil, err
+	}
+
+	updates := []*SpawnUpdate{}
+
+	for obj := spIterator.Next(); obj != nil; obj = spIterator.Next() {
+		up, ok := obj.(*SpawnUpdate)
+		if !ok {
+			return nil, fmt.Errorf("incorrect type, should not happen")
+		}
+
+		if up.LastUpdate.After(epoch) {
+			continue
+		}
+
+		updates = append(updates, up)
+	}
+
+	return updates, nil
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/google/uuid"
+	"github.com/nomoresecretz/ghoeq-common/eqStruct"
 	structPb "github.com/nomoresecretz/ghoeq-common/proto/eqstruct"
 	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 	"github.com/nomoresecretz/ghoeq/server/common"
@@ -152,6 +153,71 @@ func (s *ghoeqServer) ModifySession(ctx context.Context, r *pb.ModifySessionRequ
 	return &pb.ModifySessionResponse{
 		Responses: rpl,
 	}, nil
+}
+
+func (s *ghoeqServer) AttachClientStream(r *pb.AttachClientStreamRequest, cStream pb.BackendServer_AttachClientStreamServer) error {
+	ctx := cStream.Context()
+	rid := r.ClientId
+
+	cli, err := s.sMgr.clientWatch.WaitForClient(ctx, r.GetClientId())
+	if err != nil {
+		return fmt.Errorf("failed to get game client: %w", err)
+	}
+
+	cs, err := cli.AttachToStream(ctx)
+	if err != nil {
+		return fmt.Errorf("failed attaching to game client stream: %w", err)
+	}
+
+	handle := cs.Handle
+
+	switch rid {
+	case "":
+		var cupd *eqStruct.ClientUpdate
+		if r.GetClientId() == "" {
+			cupd = &eqStruct.ClientUpdate{
+				ClientID: string(cli.ID.String()),
+				// Address: cli., // TODO: add client address logic.
+			}
+		}
+
+		eqstr, err := protoToMsg(cupd)
+		if err != nil {
+			slog.Error("message failure: ", "error", err, "packet", spew.Sdump(cupd))
+		}
+
+		r1 := &pb.ClientPacket{
+			Struct: eqstr,
+		}
+
+		if err := cStream.Send(r1); err != nil {
+			return err
+		}
+	}
+
+	sf := func(p stream.StreamPacket) error {
+		cp, err := s.makeOutStructPacket(p)
+		if err != nil {
+			return err
+		}
+
+		return cStream.Send(cp)
+	}
+
+	if err := cli.Historic(ctx, sf, r.LastUpdate.AsTime()); err != nil {
+		return fmt.Errorf("failed sending historic state: %w", err)
+	}
+
+	slog.Debug("looping new packets")
+
+	// signal the history dump is complete.
+	if err := cStream.Send(&pb.ClientPacket{
+		StreamId: "break",
+	}); err != nil {
+		return err
+	}
+
+	return s.sendLoopStruct(ctx, handle, cStream)
 }
 
 // AttachClient notifies of new streams for a given client track.
@@ -323,7 +389,7 @@ func (s *ghoeqServer) AttachStreamStruct(r *pb.AttachStreamRequest, stream pb.Ba
 
 	slog.Debug("looping new packets")
 
-	return s.sendLoopStruct(ctx, cStream.Handle, stream, seen)
+	return s.sendLoopStruct(ctx, cStream.Handle, stream)
 }
 
 // AttachSessionRaw provides a raw feed of a capture session app packets. Mostly intended for debugging.
@@ -386,7 +452,7 @@ func (s *ghoeqServer) sendLoopRaw(ctx context.Context, handle <-chan stream.Stre
 	}
 }
 
-func (s *ghoeqServer) sendLoopStruct(ctx context.Context, handle <-chan stream.StreamPacket, stream streamSenderStruct, seen map[uint64]struct{}) error {
+func (s *ghoeqServer) sendLoopStruct(ctx context.Context, handle <-chan stream.StreamPacket, stream streamSenderStruct) error {
 	// loop sending the packets to the client
 	for {
 		select {
@@ -395,15 +461,6 @@ func (s *ghoeqServer) sendLoopStruct(ctx context.Context, handle <-chan stream.S
 		case p, ok := <-handle:
 			if !ok {
 				return nil
-			}
-
-			// Avoid double send
-			if seen != nil {
-				if _, ok := seen[p.Seq]; ok {
-					continue
-				}
-				seen[p.Seq] = struct{}{}
-				delete(seen, p.Seq-100)
 			}
 
 			outP, err := s.makeOutStructPacket(p)
@@ -458,7 +515,11 @@ func getMsg(p stream.StreamPacket) (*structPb.DataStruct, error) {
 		return nil, nil
 	}
 
-	msg := obj.ProtoMess()
+	return protoToMsg(obj)
+}
+
+func protoToMsg(p eqProto) (*structPb.DataStruct, error) {
+	msg := p.ProtoMess()
 	if msg == nil {
 		return nil, nil
 	}

@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"context"
 	"sync"
 
 	"github.com/nomoresecretz/ghoeq/server/assembler"
@@ -16,6 +17,6 @@ type streamMgr interface {
 }
 
 type gameClient interface {
-	Run(*StreamPacket) error
-	DeleteStream(assembler.Key)
+	Run(ctx context.Context, p *StreamPacket) error
+	DeleteStream(key assembler.Key)
 }

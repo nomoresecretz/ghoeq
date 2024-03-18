@@ -18,11 +18,11 @@ import (
 	pb "github.com/nomoresecretz/ghoeq-common/proto/ghoeq"
 )
 
-var opDefault = os.Getenv("OPDEFS")
+const defaultPort = 6420
 
 var (
-	opMap     = flag.String("opFile", opDefault, "File with opcode mappings")
-	port      = flag.Uint("port", 6420, "port to listen on for connections")
+	opMap     = flag.String("opFile", "opcodes.txt", "File with opcode mappings")
+	port      = flag.Uint("port", defaultPort, "port to listen on for connections")
 	bindAddr  = flag.String("bindAddr", "127.0.0.1", "Network bind address")
 	debugFlag = flag.Bool("debug", false, "enable debugging")
 )
@@ -94,6 +94,7 @@ func doStuff(ctx context.Context) error {
 		}
 
 		slog.Error("please allow one or more of the following capture sources:")
+
 		for _, s := range sl.Sources {
 			slog.Error("source", "id", s.Id, "description", s.Description)
 		}

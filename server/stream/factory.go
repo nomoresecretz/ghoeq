@@ -12,6 +12,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const defaultRingSize = 100 // packets
+
 type StreamFactory struct {
 	mgr  streamMgr
 	cout chan<- StreamPacket
@@ -31,9 +33,9 @@ func (sf *StreamFactory) New(ctx context.Context, netFlow, portFlow gopacket.Flo
 		Key:      key,
 		Net:      netFlow,
 		Port:     portFlow,
-		RB:       ringbuffer.New[StreamPacket](100),
+		RB:       ringbuffer.New[StreamPacket](defaultRingSize),
 		SF:       sf,
-		Clients:  make(map[uuid.UUID]*streamClient),
+		Clients:  make(map[uuid.UUID]*StreamClient),
 		ch:       ch,
 		Created:  now(),
 		LastSeen: now(),

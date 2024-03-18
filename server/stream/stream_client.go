@@ -7,16 +7,19 @@ import (
 	"github.com/google/uuid"
 )
 
-type streamClient struct {
+type clientParent interface {
+	DeleteClient(id uuid.UUID)
+}
+
+type StreamClient struct {
 	ID     uuid.UUID
 	Handle chan StreamPacket
 	info   string
-	parent *Stream
+	Parent clientParent
 }
 
 // Send relays the packet to the attached client session.
-func (c *streamClient) Send(ctx context.Context, ap StreamPacket) {
-	// TODO: convert this to a ring buffer
+func (c *StreamClient) Send(ctx context.Context, ap StreamPacket) {
 	select {
 	case c.Handle <- ap:
 	case <-ctx.Done():
@@ -25,15 +28,14 @@ func (c *streamClient) Send(ctx context.Context, ap StreamPacket) {
 	}
 }
 
-func (c *streamClient) String() string {
+func (c *StreamClient) String() string {
 	return c.info
 }
 
-func (sc *streamClient) Close() {
+func (sc *StreamClient) Close() {
 	slog.Info("client disconnecting", "client", sc.info)
-	sc.parent.mu.Lock()
-	delete(sc.parent.Clients, sc.ID)
-	sc.parent.mu.Unlock()
+
+	sc.Parent.DeleteClient(sc.ID)
 
 	if sc.Handle == nil {
 		return
@@ -41,5 +43,6 @@ func (sc *streamClient) Close() {
 
 	handle := sc.Handle
 	sc.Handle = nil
+
 	close(handle)
 }

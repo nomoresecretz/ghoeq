@@ -21,9 +21,11 @@ linters:
   # Default: false
   fast: true
   disable:
-    #- gci
-    #- gofmt
-    #- goimports
+    - gci
+    - funlen
+    - gofumpt
+    - gofmt
+    - goimports
     - lll
 #skip-cache: true
 linters-settings:
