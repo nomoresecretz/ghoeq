@@ -14,6 +14,8 @@ require (
 
 require (
 	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/hashicorp/go-immutable-radix v1.3.0 // indirect
+	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	golang.org/x/exp v0.0.0-20240213143201-ec583247a57a // indirect
 	golang.org/x/net v0.22.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
@@ -21,6 +23,7 @@ require (
 )
 
 require (
+	github.com/hashicorp/go-memdb v1.3.4
 	golang.org/x/sync v0.6.0
 	golang.org/x/sys v0.18.0 // indirect
 )

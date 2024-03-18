@@ -9,32 +9,38 @@ import (
 	"github.com/nomoresecretz/ghoeq/server/stream"
 )
 
+var SpawnIDIndex = &memdb.UintFieldIndex{
+	Field: "SpawnID",
+}
+
+var StreamIDIndex = &memdb.StringFieldIndex{
+	Field: "StreamID",
+}
+
+var SpawnID_StreamID_IndexSchema = &memdb.IndexSchema{
+	Name:   "SpawnID-StreamID",
+	Unique: true,
+	Indexer: &memdb.CompoundIndex{
+		Indexes: []memdb.Indexer{
+			SpawnIDIndex,
+			StreamIDIndex,
+		},
+	},
+}
+
+var SpawnID_IndexSchema = &memdb.IndexSchema{
+	Name:    "StreamID",
+	Unique:  false,
+	Indexer: StreamIDIndex,
+}
+
 var dbSchema = &memdb.DBSchema{
 	Tables: map[string]*memdb.TableSchema{
 		"spawns": {
 			Name: "spawns",
 			Indexes: map[string]*memdb.IndexSchema{
-				"SpawnID-StreamID": {
-					Name:   "SpawnID-StreamID",
-					Unique: true,
-					Indexer: &memdb.CompoundIndex{
-						Indexes: []memdb.Indexer{
-							&memdb.UintFieldIndex{
-								Field: "SpawnID",
-							},
-							&memdb.StringFieldIndex{
-								Field: "StreamID",
-							},
-						},
-					},
-				},
-				"StreamID": {
-					Name:   "StreamID",
-					Unique: false,
-					Indexer: &memdb.StringFieldIndex{
-						Field: "StreamID",
-					},
-				},
+				"SpawnID-StreamID": SpawnID_StreamID_IndexSchema,
+				"StreamID":         SpawnID_IndexSchema,
 			},
 		},
 		"spawnUpdates": {
@@ -45,39 +51,16 @@ var dbSchema = &memdb.DBSchema{
 					Unique: true,
 					Indexer: &memdb.CompoundIndex{
 						Indexes: []memdb.Indexer{
-							&memdb.UintFieldIndex{
-								Field: "SpawnID",
-							},
-							&memdb.StringFieldIndex{
-								Field: "StreamID",
-							},
+							SpawnIDIndex,
+							StreamIDIndex,
 							&memdb.UintFieldIndex{
 								Field: "UpdateType",
 							},
 						},
 					},
 				},
-				"SpawnID-StreamID": {
-					Name:   "SpawnID-StreamID",
-					Unique: false,
-					Indexer: &memdb.CompoundIndex{
-						Indexes: []memdb.Indexer{
-							&memdb.UintFieldIndex{
-								Field: "SpawnID",
-							},
-							&memdb.StringFieldIndex{
-								Field: "StreamID",
-							},
-						},
-					},
-				},
-				"StreamID": {
-					Name:   "StreamID",
-					Unique: false,
-					Indexer: &memdb.StringFieldIndex{
-						Field: "StreamID",
-					},
-				},
+				"SpawnID-StreamID": SpawnID_StreamID_IndexSchema,
+				"StreamID":         SpawnID_IndexSchema,
 			},
 		},
 	},
