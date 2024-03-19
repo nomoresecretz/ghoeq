@@ -127,7 +127,7 @@ func (c *GameClient) handlePlayEQ(p *stream.StreamPacket) error {
 	}
 
 	if err := dnsCheck(&ply.IP); err != nil {
-		return fmt.Errorf("zone server dns lookup failure: %w", err)
+		return fmt.Errorf("world server dns lookup failure: %w", err)
 	}
 
 	Key := fmt.Sprintf("%s:%d", ply.IP, defaultGamePort)
