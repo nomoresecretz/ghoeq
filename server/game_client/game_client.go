@@ -120,6 +120,7 @@ func New(c *GameClientWatch) *GameClient {
 		parent:  c,
 		db:      c.db,
 		ch:      make(chan stream.StreamPacket, common.ClientBuffer),
+		Mu:      &sync.RWMutex{},
 	}
 
 	return gc

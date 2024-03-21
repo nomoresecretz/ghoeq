@@ -13,7 +13,7 @@ import (
 )
 
 type GameClientWatch struct {
-	mu        sync.RWMutex
+	mu        *sync.RWMutex
 	clients   map[uuid.UUID]*GameClient
 	predicted streamPredict
 	ping      chan struct{}
@@ -36,6 +36,7 @@ func NewClientWatch() (*GameClientWatch, error) {
 		charMap:   make(map[string]*GameClient),
 		acctMap:   make(map[string]*GameClient),
 		db:        db,
+		mu:        &sync.RWMutex{},
 	}, nil
 }
 
