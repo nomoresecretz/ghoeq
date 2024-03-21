@@ -40,10 +40,10 @@ type StreamType uint
 
 const (
 	ST_UNKNOWN StreamType = iota
-	ST_LOGIN              = 1
-	ST_WORLD              = 2
-	ST_ZONE               = 3
-	ST_CHAT               = 4
+	ST_LOGIN
+	ST_WORLD
+	ST_ZONE
+	ST_CHAT
 )
 
 type Stream struct {

@@ -100,6 +100,7 @@ func (c *GameClient) Close() {
 	c.parent.mu.Lock()
 	delete(c.parent.charMap, c.clientCharacter)
 	c.parent.mu.Unlock()
+	close(c.ch)
 }
 
 func (c *GameClient) ClosePing() {
@@ -111,7 +112,7 @@ func (c *GameClient) ClosePing() {
 	}
 }
 
-func New(c *GameClientWatch) *GameClient {
+func New(ctx context.Context, c *GameClientWatch) *GameClient {
 	gc := &GameClient{
 		ID:      uuid.New(),
 		Streams: make(map[assembler.Key]*stream.Stream),
@@ -120,10 +121,44 @@ func New(c *GameClientWatch) *GameClient {
 		parent:  c,
 		db:      c.db,
 		ch:      make(chan stream.StreamPacket, common.ClientBuffer),
+		clients: make(map[uuid.UUID]*stream.StreamClient),
 		Mu:      &sync.RWMutex{},
 	}
 
+	go gc.fanoutRunner(ctx) // TODO: track this goroutine properly.
+
 	return gc
+}
+
+func (gc *GameClient) fanoutRunner(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			close(gc.ch)
+		case p, ok := <-gc.ch:
+			if !ok {
+				gc.Mu.Lock()
+				defer gc.Mu.Unlock()
+				gc.closeClientsLocked()
+
+				return
+			}
+
+			gc.Mu.RLock()
+
+			for _, c := range gc.clients {
+				c.Send(ctx, p)
+			}
+
+			gc.Mu.RUnlock()
+		}
+	}
+}
+
+func (gc *GameClient) closeClientsLocked() {
+	for _, c := range gc.clients {
+		c.Close()
+	}
 }
 
 func (c *GameClient) Run(ctx context.Context, p *stream.StreamPacket) error {
@@ -157,6 +192,9 @@ func (c *GameClient) Historic(ctx context.Context, sf func(s stream.StreamPacket
 	rt := epoch.Add(defaultFudgeTime) // fudge back a bit.
 
 	strm := c.Streams[c.zoneStream]
+	if strm == nil {
+		return nil
+	}
 
 	sp, err := c.db.HistoricSpawns(strm.ID, rt)
 	if err != nil {

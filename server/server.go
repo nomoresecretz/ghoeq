@@ -169,6 +169,8 @@ func (s *ghoeqServer) AttachClientStream(r *pb.AttachClientStreamRequest, cStrea
 		return fmt.Errorf("failed attaching to game client stream: %w", err)
 	}
 
+	defer cs.Close()
+
 	handle := cs.Handle
 
 	switch rid {

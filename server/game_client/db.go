@@ -125,6 +125,7 @@ func (d *DB) Update(p *stream.StreamPacket) error {
 
 func (d *DB) UpdateSpawns(p *stream.StreamPacket, z *eqStruct.ZoneSpawns) error {
 	txn := d.db.Txn(true)
+	defer txn.Abort()
 
 	for _, s := range z.Spawns {
 		if err := d.UpdateSpawn(p, s, txn); err != nil {
@@ -132,11 +133,14 @@ func (d *DB) UpdateSpawns(p *stream.StreamPacket, z *eqStruct.ZoneSpawns) error 
 		}
 	}
 
+	txn.Commit()
+
 	return nil
 }
 
 func (d *DB) DeleteSpawn(p *stream.StreamPacket, s *eqStruct.DeleteSpawn) error {
 	txn := d.db.Txn(true)
+	defer txn.Abort()
 
 	sp := Spawn{
 		SpawnID:  s.SpawnID,
@@ -157,10 +161,11 @@ func (d *DB) DeleteSpawn(p *stream.StreamPacket, s *eqStruct.DeleteSpawn) error 
 
 func (d *DB) UpdateSpawn(p *stream.StreamPacket, z *eqStruct.ZoneSpawn, itxn *memdb.Txn) error {
 	var txn *memdb.Txn
-	if itxn == nil {
+	if itxn != nil {
 		txn = itxn
 	} else {
 		txn = d.db.Txn(true)
+		defer txn.Abort()
 	}
 
 	if err := txn.Insert("spawns", Spawn{
@@ -181,6 +186,7 @@ func (d *DB) UpdateSpawn(p *stream.StreamPacket, z *eqStruct.ZoneSpawn, itxn *me
 
 func (d *DB) UpdateSpawnPositions(p *stream.StreamPacket, z *eqStruct.SpawnPositionUpdates) error {
 	txn := d.db.Txn(true)
+	defer txn.Abort()
 
 	for _, s := range z.Updates {
 		if err := d.SpawnUpdate(p, s, SUT_Position, txn); err != nil {
@@ -188,15 +194,18 @@ func (d *DB) UpdateSpawnPositions(p *stream.StreamPacket, z *eqStruct.SpawnPosit
 		}
 	}
 
+	txn.Commit()
+
 	return nil
 }
 
 func (d *DB) SpawnUpdate(p *stream.StreamPacket, z eqStruct.EQStruct, uType UpdateType, itxn *memdb.Txn) error {
 	var txn *memdb.Txn
-	if itxn == nil {
+	if itxn != nil {
 		txn = itxn
 	} else {
 		txn = d.db.Txn(true)
+		defer txn.Abort()
 	}
 
 	if err := txn.Insert("spawns", SpawnUpdate{

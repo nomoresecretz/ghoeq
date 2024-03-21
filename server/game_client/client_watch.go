@@ -40,8 +40,8 @@ func NewClientWatch() (*GameClientWatch, error) {
 	}, nil
 }
 
-func (c *GameClientWatch) newClient() *GameClient {
-	gc := New(c)
+func (c *GameClientWatch) newClient(ctx context.Context) *GameClient {
+	gc := New(ctx, c)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -160,9 +160,9 @@ func (c *GameClientWatch) Check(p *stream.StreamPacket) bool {
 	return false
 }
 
-func (c *GameClientWatch) newPredictClient(p *stream.StreamPacket) {
+func (c *GameClientWatch) newPredictClient(ctx context.Context, p *stream.StreamPacket) {
 	rv := p.Stream.Key.Reverse()
-	cli := c.newClient()
+	cli := c.newClient(ctx)
 	slog.Info("unknown/new client thread seen, adding client", "client", cli.ID, "streamtype", p.Stream.Type.String())
 	p.Stream.GameClient = cli
 	cli.AddStream(p.Stream)
@@ -285,7 +285,7 @@ func (c *GameClientWatch) Run(ctx context.Context, p *stream.StreamPacket) error
 
 	switch p.Stream.Type {
 	case stream.ST_WORLD, stream.ST_LOGIN: // Wait for a zone event at minimum.
-		c.newPredictClient(p)
+		c.newPredictClient(ctx, p)
 
 		return p.Stream.GameClient.Run(ctx, p)
 	}

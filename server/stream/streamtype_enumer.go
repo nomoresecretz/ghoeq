@@ -6,9 +6,9 @@ import (
 	"fmt"
 )
 
-const _StreamTypeName = "ST_UNKNOWN"
+const _StreamTypeName = "ST_UNKNOWNST_LOGINST_WORLDST_ZONEST_CHAT"
 
-var _StreamTypeIndex = [...]uint8{0, 10}
+var _StreamTypeIndex = [...]uint8{0, 10, 18, 26, 33, 40}
 
 func (i StreamType) String() string {
 	if i >= StreamType(len(_StreamTypeIndex)-1) {
@@ -17,10 +17,14 @@ func (i StreamType) String() string {
 	return _StreamTypeName[_StreamTypeIndex[i]:_StreamTypeIndex[i+1]]
 }
 
-var _StreamTypeValues = []StreamType{0}
+var _StreamTypeValues = []StreamType{0, 1, 2, 3, 4}
 
 var _StreamTypeNameToValueMap = map[string]StreamType{
-	_StreamTypeName[0:10]: 0,
+	_StreamTypeName[0:10]:  0,
+	_StreamTypeName[10:18]: 1,
+	_StreamTypeName[18:26]: 2,
+	_StreamTypeName[26:33]: 3,
+	_StreamTypeName[33:40]: 4,
 }
 
 // StreamTypeString retrieves an enum value from the enum constants string name.
