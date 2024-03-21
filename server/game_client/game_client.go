@@ -55,6 +55,7 @@ type GameClient struct {
 	PlayerProfile   *eqStruct.PlayerProfile
 	db              *DB
 	ch              chan stream.StreamPacket
+	once            sync.Once
 }
 
 func (gc *GameClient) DeleteClient(id uuid.UUID) {
@@ -100,7 +101,7 @@ func (c *GameClient) Close() {
 	c.parent.mu.Lock()
 	delete(c.parent.charMap, c.clientCharacter)
 	c.parent.mu.Unlock()
-	close(c.ch)
+	c.once.Do(func() { close(c.ch) })
 }
 
 func (c *GameClient) ClosePing() {
@@ -134,7 +135,7 @@ func (gc *GameClient) fanoutRunner(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			close(gc.ch)
+			gc.once.Do(func() { close(gc.ch) })
 		case p, ok := <-gc.ch:
 			if !ok {
 				gc.Mu.Lock()
