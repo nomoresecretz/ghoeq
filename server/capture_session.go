@@ -65,7 +65,6 @@ func (s *session) Run(ctx context.Context, src string, d common.OpDecoder) error
 
 	defer h.Close()
 
-	// TODO: replace this with lockless ring buffer.
 	apc := make(chan stream.StreamPacket, procBuffer)
 	apcb := make(chan stream.StreamPacket, procBuffer)
 	s.clientChan = apcb
@@ -249,7 +248,6 @@ func (s *session) closeClients() {
 
 // Send relays the packet to the attached client session.
 func (c *sessionClient) Send(ctx context.Context, p stream.StreamPacket) {
-	// TODO: convert this to a ring buffer
 	select {
 	case c.handle <- p:
 	case <-ctx.Done():

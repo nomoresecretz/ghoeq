@@ -34,5 +34,6 @@ linters-settings:
       main:
         list-mode: lax
         allow:
-          - github.com/gopacket/*
-          - github.com/nomoresecretz/ghoeq/*
+          - github.com/gopacket
+          - github.com/nomoresecretz/ghoeq
+          - github.com/nomoresecretz/ghoeq-common

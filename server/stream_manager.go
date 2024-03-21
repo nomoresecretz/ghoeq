@@ -35,6 +35,7 @@ func NewStreamMgr(d common.OpDecoder, cw *game_client.GameClientWatch) *streamMg
 		streamMap:     make(map[string]assembler.Key),
 		decoder:       d,
 		clientWatch:   cw,
+		mu:            &sync.RWMutex{},
 	}
 }
 

@@ -5,8 +5,8 @@ import (
 )
 
 type OpDecoder interface {
-	GetOp(decoder.OpCode) string
-	GetOpByName(string) decoder.OpCode
+	GetOp(opCode decoder.OpCode) string
+	GetOpByName(name string) decoder.OpCode
 }
 
 const ClientBuffer = 50 // packets
